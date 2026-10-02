@@ -1,0 +1,25 @@
+.dialogRow {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.dialogRowLicense {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  gap: 15px;
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+}
+
+.resource-row app-textarea-wrapper {
+  flex: 1;
+}
+
+.resource-row button {
+  margin-left: 8px;
+}

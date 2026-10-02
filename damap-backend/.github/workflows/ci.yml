@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - next
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # This job builds the Docker backend image and runs a health check to ensure it is up and running.
+  # It uses 2 databases: Oracle and PostgreSQL.
+  test-docker:
+    name: test-docker (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - database: postgres
+            profile: with_postgres
+            db_kind: postgresql
+
+          - database: oracle
+            profile: with_oracle
+            db_kind: oracle
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker compose build backend
+
+      - name: Start containers
+        env:
+          DAMAP_DB_KIND: ${{ matrix.db_kind }}
+        run: docker compose --profile ${{ matrix.profile }} up -d
+
+      - name: Run health check
+        run: |
+          set -e
+          # Wait for max 10 minutes. Yes, Oracle is slow.
+          for i in $(seq 1 120); do
+            echo "Attempt $i..."
+            sleep 5
+            response=$(curl -s -w "%{http_code}" -o /dev/null http://127.0.0.1:8085)
+            echo -e "Status code: $response"
+            if [ "$response" == "200" ]; then
+              echo "Health check passed after $i attempt(s)."
+              break
+            fi
+          done
+
+          if [ "$response" != "200" ]; then
+            echo "Health check failed after 120 attempts."
+            exit 1
+          fi
+
+  # This job runs Maven tests against different databases.
+  # It uses 3 databases: H2 (in-memory), PostgreSQL, and Oracle.
+  # The Oracle and PostgreSQL databases are started using Docker Compose profiles.
+  # The H2 database is used by default and does not require a Docker container.
+  test-maven:
+    name: test-maven (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    needs: test-docker
+    strategy:
+      matrix:
+        include:
+          - database: h2
+
+          - database: postgres
+            db_kind: postgresql
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+            driver: org.postgresql.Driver
+            url: jdbc:postgresql://127.0.0.1:8088/damap
+            profile: with_postgres
+
+          - database: oracle
+            db_kind: oracle
+            dialect: org.hibernate.dialect.OracleDialect
+            driver: oracle.jdbc.driver.OracleDriver
+            url: jdbc:oracle:thin:@127.0.0.1:8088/FREEPDB1
+            profile: with_oracle
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start dockerized database
+        if: ${{ matrix.database != 'h2' }}
+        run: docker compose --profile ${{ matrix.profile }} up -d ${{ matrix.database }}-db
+
+      - name: Wait for DB healthcheck
+        if: ${{ matrix.database != 'h2' }}
+        run: |
+          set -e
+          # Wait for the database to accept connections.
+          for i in $(seq 1 120); do
+            echo "Attempt $i..."
+            if nc -z 127.0.0.1 8088; then
+              echo "Port 8088 is open. DB is up."
+              break
+            fi
+            sleep 5
+          done
+
+          if ! nc -z 127.0.0.1 8088; then
+            echo "Timed out waiting for DB on port 8088."
+            exit 1
+          fi
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Set up Maven Action
+        uses: s4u/setup-maven-action@v1.12.0
+        with:
+          java-version: "17"
+          maven-version: "3.9.5"
+
+      - name: Run Maven tests
+        run: |
+          if [ "${{ matrix.database }}" = "h2" ]; then
+            mvn -B clean install
+          else
+            mvn -B clean install \
+              -Dquarkus.datasource.db-kind=${{ matrix.db_kind }} \
+              -Dquarkus.datasource.jdbc.driver=${{ matrix.driver }} \
+              -Dquarkus.datasource.jdbc.url=${{ matrix.url }} \
+              -Dquarkus.hibernate-orm.dialect=${{ matrix.dialect }}
+          fi

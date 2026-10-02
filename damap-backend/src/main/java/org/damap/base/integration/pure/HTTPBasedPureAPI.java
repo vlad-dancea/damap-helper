@@ -1,0 +1,180 @@
+package org.damap.base.integration.pure;
+
+import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.rest.client.reactive.ClientExceptionMapper;
+import jakarta.enterprise.inject.Typed;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import org.damap.base.enums.EErrorCode;
+import org.damap.base.exception.DamapApiException;
+import org.damap.base.exception.ErrorDto;
+import org.eclipse.microprofile.faulttolerance.Fallback;
+import org.eclipse.microprofile.faulttolerance.Timeout;
+import org.eclipse.microprofile.rest.client.annotation.RegisterClientHeaders;
+import org.jboss.logging.Logger;
+
+@Path("")
+@Produces(MediaType.APPLICATION_JSON)
+@Typed(HTTPBasedPureAPI.class)
+// TODO: This probably doesnt work with multitenancy as it always reads the default config, check if
+// it can be removed safely
+@LookupIfProperty(name = "damap.tenant-aware.elsevier-pure-backend", stringValue = "http")
+@Timeout(10000)
+@RegisterClientHeaders(PureAuthenticationHeaderFactory.class)
+interface HTTPBasedPureAPI extends PureAPI {
+
+  Logger log = Logger.getLogger(HTTPBasedPureAPI.class);
+
+  /**
+   * List all projects using pagination.
+   *
+   * @param size the size of the page.
+   * @param offset the offset to start at.
+   * @return the response containing the projects on that page.
+   */
+  @GET
+  @Fallback(fallbackMethod = "listAllProjectsFallback", skipOn = DamapApiException.class)
+  @Path("/projects")
+  @Override
+  PureAPIPaginatedProjectsResponse listAllProjects(
+      @QueryParam("size") Long size, @QueryParam("offset") Long offset);
+
+  /**
+   * Search projects via {@code POST /projects/search}.
+   *
+   * @param query the search query body.
+   * @return the response containing the matching projects on that page.
+   */
+  @POST
+  @Path("/projects/search")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Fallback(fallbackMethod = "searchProjectsPostFallback", skipOn = DamapApiException.class)
+  PureAPIPaginatedProjectsResponse searchProjectsPost(PureAPIProjectsQuery query);
+
+  /**
+   * Search projects using pagination. Delegates to {@link #searchProjectsPost} with a {@link
+   * PureAPIProjectsQuery} body.
+   *
+   * @param q query string, passed to Pure API {@code searchString} parameter
+   * @param size the size of the page.
+   * @param offset the offset to start at.
+   * @return the response containing the projects on that page.
+   */
+  @Override
+  default PureAPIPaginatedProjectsResponse searchProjects(String q, Long size, Long offset) {
+    PureAPIProjectsQuery body = new PureAPIProjectsQuery();
+    body.setSearchString(q);
+    if (size != null) body.setSize(size.intValue());
+    if (offset != null) body.setOffset(offset.intValue());
+    return searchProjectsPost(body);
+  }
+
+  /**
+   * Retrieve a project with a specific ID.
+   *
+   * @param uuid the ID of the project.
+   * @return the project if found, or null if the project was not found.
+   */
+  @GET
+  @Fallback(fallbackMethod = "getProjectFallback", skipOn = DamapApiException.class)
+  @Path("/projects/{uuid}")
+  @Override
+  PureAPIProject getProject(@PathParam("uuid") String uuid);
+
+  /**
+   * Retrieve all persons in the database, paginated.
+   *
+   * @param size the size of the page.
+   * @param offset the offset to start at.
+   * @return the response containing the list of persons.
+   */
+  @GET
+  @Path("/persons")
+  @Fallback(fallbackMethod = "listAllPersonsFallback", skipOn = DamapApiException.class)
+  @Override
+  PureAPIPaginatedPersonsResponse listAllPersons(
+      @QueryParam("size") Long size, @QueryParam("offset") Long offset);
+
+  // Pure returns only a minimal Person by default. We ask for the fields we actually consume
+  // (org association emails, user ref) via the fields query param.
+  @GET
+  @Path("/persons/{uuid}")
+  @Fallback(fallbackMethod = "getPersonWithFieldsFallback", skipOn = DamapApiException.class)
+  PureAPIPerson getPerson(@PathParam("uuid") String uuid, @QueryParam("fields") String fields);
+
+  /** Fetch one user by uuid. */
+  @GET
+  @Path("/users/{uuid}")
+  @Fallback(fallbackMethod = "getUserFallback", skipOn = DamapApiException.class)
+  @Override
+  PureAPIUser getUser(@PathParam("uuid") String uuid);
+
+  // Kept as a default so the fields list stays in one place.
+  @Override
+  default PureAPIPerson getPerson(String uuid) {
+    return getPerson(
+        uuid,
+        "uuid,name.*,orcid,staffOrganizationAssociations.emails.*,studentOrganizationAssociations.emails.*,user.uuid");
+  }
+
+  @ClientExceptionMapper
+  static DamapApiException toException(Response response) {
+    // If the methods that caused the error are important for the error messages, you need a
+    // ResteasyReactiveResponseExceptionMapper and register it as a provider
+    return switch (response.getStatus()) {
+      case 404 ->
+          new DamapApiException(
+              new ErrorDto(
+                  EErrorCode.PURE_NOT_FOUND,
+                  "A Person or Project over the Pure API couldn't be found"),
+              Response.Status.NOT_FOUND);
+      case 500, 502, 503, 504 ->
+          new DamapApiException(
+              new ErrorDto(
+                  EErrorCode.PURE_NOT_AVAILABLE,
+                  "Pure API is currently not available, caused by " + response.getStatus()),
+              Response.Status.INTERNAL_SERVER_ERROR);
+      default ->
+          new DamapApiException(
+              new ErrorDto(
+                  EErrorCode.PURE_UNEXPECTED_ERROR,
+                  "Something unexpected happened while calling Pure API, caused by "
+                      + response.getStatus()),
+              Response.Status.INTERNAL_SERVER_ERROR);
+    };
+  }
+
+  default PureAPIPaginatedProjectsResponse listAllProjectsFallback(Long size, Long offset) {
+    throw fallback();
+  }
+
+  default PureAPIPaginatedProjectsResponse searchProjectsPostFallback(PureAPIProjectsQuery query) {
+    throw fallback();
+  }
+
+  default PureAPIProject getProjectFallback(String uuid) {
+    throw fallback();
+  }
+
+  default PureAPIPaginatedPersonsResponse listAllPersonsFallback(Long size, Long offset) {
+    throw fallback();
+  }
+
+  default PureAPIPerson getPersonWithFieldsFallback(String uuid, String fields) {
+    throw fallback();
+  }
+
+  default PureAPIUser getUserFallback(String uuid) {
+    throw fallback();
+  }
+
+  default DamapApiException fallback() {
+    log.info("The PURE API did not respond and timed out");
+    return new DamapApiException(
+        new ErrorDto(
+            EErrorCode.PURE_NOT_AVAILABLE,
+            "Pure API is currently not available, connection timed out"),
+        jakarta.ws.rs.core.Response.Status.INTERNAL_SERVER_ERROR);
+  }
+}

@@ -1,0 +1,50 @@
+databaseChangeLog:
+  - changeSet:
+      id: 17
+      author: Geoffrey Karnbach
+      # This changeset used to include postgres only code
+      # It was removed using validCheckSum, since some systems already deployed the old changeset
+      validCheckSum:
+        - 9:fa58a1e00783e5d2149d37385f306ecc
+        - 9:27b12d878aa432defab22ce460bb4d97
+      changes:
+        - createSequence:
+            sequenceName: banner_seq
+            startValue: 1
+            incrementBy: 1
+
+        - createTable:
+            tableName: banner
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: title
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: description
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: dismissible
+                  type: BOOLEAN
+                  constraints:
+                    nullable: true
+              - column:
+                  name: color
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+
+      rollback:
+        - dropTable:
+            tableName: banner
+        - dropSequence:
+            sequenceName: banner_seq
