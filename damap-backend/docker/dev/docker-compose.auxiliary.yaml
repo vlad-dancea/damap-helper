@@ -67,7 +67,8 @@ services:
         aliases:
           - api-mock
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8091/" ]
+      # json-server listens on port 80 inside the container (8091 is only the host mapping)
+      test: [ "CMD-SHELL", "curl -fs http://localhost:80/ >/dev/null || wget -q -O /dev/null http://localhost:80/" ]
       interval: 30s
       timeout: 15s
       retries: 5
