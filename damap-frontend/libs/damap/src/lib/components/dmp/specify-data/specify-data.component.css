@@ -1,0 +1,50 @@
+.step-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  padding-bottom: 30px;
+}
+
+@media (max-width: 768px) {
+  .step-container {
+    gap: 2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .step-container {
+    gap: 1.5rem;
+    padding: 1rem;
+  }
+
+  app-created-data,
+  app-reused-data,
+  app-textarea-wrapper {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  mat-form-field,
+  mat-select,
+  mat-input {
+    width: 100%;
+  }
+
+  .mat-card {
+    width: 100%;
+    margin: 0;
+    padding: 1rem;
+    display: flex;
+  }
+
+  .mat-card-title,
+  .mat-card-content {
+    font-size: 1rem;
+  }
+
+  button {
+    width: 100%;
+  }
+}

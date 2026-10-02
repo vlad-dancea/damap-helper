@@ -1,0 +1,47 @@
+.mat-card-container {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  gap: 14px;
+}
+
+.form-full-width,
+.full-width {
+  width: 100%;
+}
+
+.title-thin {
+  font-weight: 400;
+}
+
+@media screen and (max-width: 768px) {
+  .responsive-card {
+    width: 100%;
+    padding: 8px;
+  }
+
+  .mat-card-container {
+    flex-direction: column;
+    width: 100%;
+    padding: 0;
+  }
+
+  button {
+    font-size: 1rem;
+  }
+
+  .form-full-width {
+    width: 100%;
+  }
+
+  .mat-card-container > * {
+    margin-bottom: 8px;
+  }
+}
+
+.data-quality-question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

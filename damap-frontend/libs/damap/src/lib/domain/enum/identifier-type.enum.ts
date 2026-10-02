@@ -1,0 +1,15 @@
+export enum IdentifierType {
+  ORCID = 'ORCID',
+  ISNI = 'ISNI',
+  OPENID = 'OPENID',
+  HANDLE = 'HANDLE',
+  DOI = 'DOI',
+  ARK = 'ARK',
+  URL = 'URL',
+  HDL = 'HDL',
+  PURL = 'PURL',
+  URN = 'URN',
+  FUNDREF = 'FUNDREF',
+  ROR = 'ROR',
+  OTHER = 'OTHER',
+}

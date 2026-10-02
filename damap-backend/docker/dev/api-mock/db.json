@@ -1,0 +1,305 @@
+{
+  "projects": [
+    {
+      "acronym": "PROJ.ACRONYM",
+      "universityId": "uniProjectId0",
+      "description": "Project description text.",
+      "title": "Project Title",
+      "funding": null,
+      "start": "2022-01-01T00:00:00.000Z",
+      "end": "2024-12-31T00:00:00.000Z",
+      "dmpExists": false
+    },
+    {
+      "acronym": "PROJ.NO-FUNDING",
+      "universityId": "uniProjectIdNoFunding0",
+      "description": "This project has no funding and is recommended.",
+      "title": "No Funding Sample Project",
+      "funding": null,
+      "start": "2022-01-01T00:00:00.000Z",
+      "end": "2024-12-31T00:00:00.000Z",
+      "dmpExists": false
+    },
+    {
+      "acronym": "PROJ.HORIZON-EUROPE",
+      "universityId": "uniProjectIdHorizonEurope0",
+      "description": "This project is funded by the EU and is recommended.",
+      "title": "Horizon Europe Sample Project",
+      "funding": {
+        "fundingName": null,
+        "fundingProgram": null,
+        "funderId": {
+          "identifier": "501100000780",
+          "type": "FUNDREF"
+        },
+        "grantId": {
+          "identifier": null,
+          "type": null
+        },
+        "fundingStatus": "GRANTED"
+      },
+      "start": "2022-01-01T00:00:00.000Z",
+      "end": "2024-12-31T00:00:00.000Z",
+      "dmpExists": false
+    },
+    {
+      "acronym": "PROJ.FWF",
+      "universityId": "uniProjectIdFWF0",
+      "description": "This project is funded by the FWF and is recommended.",
+      "title": "FWF Sample Project",
+      "funding": {
+        "fundingName": null,
+        "fundingProgram": null,
+        "funderId": {
+          "identifier": "501100002428",
+          "type": "FUNDREF"
+        },
+        "grantId": {
+          "identifier": null,
+          "type": null
+        },
+        "fundingStatus": "GRANTED"
+      },
+      "start": "2022-01-01T00:00:00.000Z",
+      "end": "2024-12-31T00:00:00.000Z",
+      "dmpExists": false
+    },
+    {
+      "acronym": "PROJ.UNKNOWN-FUNDING",
+      "universityId": "uniProjectIdUnknownFunder0",
+      "description": "This project is funded by an unknown entity and is recommended.",
+      "title": "Unknown Funder Sample Project",
+      "funding": {
+        "fundingName": null,
+        "fundingProgram": null,
+        "funderId": {
+          "identifier": "501100004955",
+          "type": "FUNDREF"
+        },
+        "grantId": {
+          "identifier": null,
+          "type": null
+        },
+        "fundingStatus": "GRANTED"
+      },
+      "start": "2022-01-01T00:00:00.000Z",
+      "end": "2024-12-31T00:00:00.000Z",
+      "dmpExists": false
+    }
+  ],
+  "persons": [
+    {
+      "universityId": "654321",
+      "personId": {
+        "identifier":  "admin_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Admin",
+      "lastName": "Admin",
+      "mbox": "admin.admin@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "123456",
+      "personId": {
+        "identifier":  "user_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "User",
+      "lastName": "User",
+      "mbox": "mbox@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "josiah_carberry_uni_id",
+      "personId": {
+        "identifier":  "0000-0002-1825-0097",
+        "type": "ORCID"
+      },
+      "firstName": "Josiah",
+      "lastName": "Carberry",
+      "mbox": "josiah.carberry@address.com",
+      "affiliation": "Wesleyan University",
+      "affiliationId": {
+        "identifier":  "05h7xva58",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "rose_tennsion_uni_id",
+      "personId": {
+        "identifier":  "rose_tennison_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Rose",
+      "lastName": "Tennison",
+      "mbox": "rose.tennison@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "karl_sylvester_uni_id",
+      "personId": {
+        "identifier":  "karl_sylvester_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Karl",
+      "lastName": "Sylvester",
+      "mbox": "karl.sylvester@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "amanda_jones_uni_id",
+      "personId": {
+        "identifier":  "amanda_jones_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Amanda",
+      "lastName": "Jones",
+      "mbox": "amanda.jones@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "benjamin_martinez_uni_id",
+      "personId": {
+        "identifier":  "benjamin_martinez_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Benjamin",
+      "lastName": "Martinez",
+      "mbox": "benjamin.martinez@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "chloe_thompson_uni_id",
+      "personId": {
+        "identifier":  "chloe_thompson_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Chloe",
+      "lastName": "Thompson",
+      "mbox": "chloe.thompson@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "david_rodriguez_uni_id",
+      "personId": {
+        "identifier":  "david_rodriguez_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "David",
+      "lastName": "Rodriguez",
+      "mbox": "david.rodriguez@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "emily_lee_uni_id",
+      "personId": {
+        "identifier":  "emily_lee_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Emily",
+      "lastName": "Lee",
+      "mbox": "emily.lee@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "henry_smith_uni_id",
+      "personId": {
+        "identifier":  "henry_smith_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Henry",
+      "lastName": "Smith",
+      "mbox": "henry.smith@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    },
+    {
+      "universityId": "isabella_johnson_uni_id",
+      "personId": {
+        "identifier":  "isabella_johnson_isni_id0",
+        "type": "ISNI"
+      },
+      "firstName": "Isabella",
+      "lastName": "Johnson",
+      "mbox": "isabella.johnson@address.com",
+      "affiliation": "affId0",
+      "affiliationId": {
+        "identifier":  "some_id0",
+        "type": "ROR"
+      },
+      "contact": false,
+      "roleInProject": "Role In Project"
+    }
+  ],
+  "project-supplement": {
+    "personalData": true,
+    "sensitiveData": true,
+    "legalRestrictions": false,
+    "humanParticipants": true,
+    "ethicalIssuesExist": true,
+    "committeeReviewed": false,
+    "costsExist": false
+  }
+}

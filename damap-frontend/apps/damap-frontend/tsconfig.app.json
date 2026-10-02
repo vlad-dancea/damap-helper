@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../dist/out-tsc"
+  },
+  "angularCompilerOptions": {
+    "types": ["node", "jasmine"]
+  },
+  "files": ["src/main.ts", "src/polyfills.ts"]
+}

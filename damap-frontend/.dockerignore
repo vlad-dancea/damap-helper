@@ -1,0 +1,10 @@
+*
+*/**
+
+!apps/**/*
+!libs/**/*
+!*.json
+!*.js
+!browserslist
+!docker/*
+!nginx.conf
