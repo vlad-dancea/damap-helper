@@ -1,0 +1,69 @@
+[tools]
+# damap-backend: Quarkus 3.11 / Maven
+java = "temurin-21.0.12+101.0.LTS"
+maven = "3.10.0"
+# damap-frontend: Angular 19 supports Node ^18.19.1 || ^20.11.1 || ^22.0.0
+node = "22.23.3"
+"npm:@angular/cli" = "19.2.18"
+
+[env]
+_.path = ["damap-frontend/node_modules/.bin"]
+
+# --- Auxiliary services (Postgres, Keycloak, API mock, Gotenberg) ---
+
+# Omarchy keeps users out of the docker group, so Docker needs sudo unless the
+# socket is writable (e.g. after `omarchy setup security sudoless-docker`).
+[tasks."services:up"]
+description = "Start the Docker services the backend needs"
+dir = "damap-backend"
+run = '$([ -w /var/run/docker.sock ] || echo sudo) docker compose up -d --wait postgres-db keycloak api-mock gotenberg'
+
+[tasks."services:down"]
+description = "Stop the Docker services"
+dir = "damap-backend"
+run = '$([ -w /var/run/docker.sock ] || echo sudo) docker compose down'
+
+# --- Backend ---
+
+[tasks."backend:build"]
+description = "Compile and package the backend (skips tests)"
+dir = "damap-backend"
+run = "mvn -B package -DskipTests"
+
+[tasks."backend:test"]
+description = "Run backend tests"
+dir = "damap-backend"
+run = "mvn -B test"
+
+[tasks."backend:dev"]
+description = "Run the backend in Quarkus dev mode on http://localhost:8080"
+depends = ["services:up"]
+dir = "damap-backend"
+run = "mvn compile quarkus:dev"
+
+# --- Frontend ---
+
+[tasks."frontend:install"]
+description = "Install frontend npm dependencies"
+dir = "damap-frontend"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm ci"
+
+[tasks."frontend:build"]
+description = "Build the frontend"
+depends = ["frontend:install"]
+dir = "damap-frontend"
+run = "npm run build"
+
+[tasks."frontend:dev"]
+description = "Run the frontend dev server on http://localhost:4200"
+depends = ["frontend:install"]
+dir = "damap-frontend"
+run = "npm start"
+
+# --- Everything ---
+
+[tasks.dev]
+description = "Run services, backend and frontend together"
+depends = ["backend:dev", "frontend:dev"]
