@@ -5,6 +5,8 @@ maven = "3.10.0"
 # damap-frontend: Angular 19 supports Node ^18.19.1 || ^20.11.1 || ^22.0.0
 node = "22.23.3"
 "npm:@angular/cli" = "19.2.18"
+# damap-helper: Rust CLI
+rust = "1.99.0"
 
 [env]
 _.path = ["damap-frontend/node_modules/.bin"]
