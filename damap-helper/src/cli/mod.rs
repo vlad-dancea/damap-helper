@@ -44,7 +44,9 @@ pub fn run() -> Result<()> {
         Command::Init { url, model } => init::run(url, model),
         Command::Run { dmp } => run::run(dmp),
         Command::Logout => {
-            if Credentials::delete()? {
+            let mut credentials = Credentials::load()?;
+            if credentials.refresh_token.take().is_some() {
+                credentials.save()?;
                 println!("Logged out.");
             } else {
                 println!("Not logged in.");

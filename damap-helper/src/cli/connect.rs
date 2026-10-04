@@ -10,7 +10,7 @@ use crate::auth::{Oidc, Tokens};
 use crate::config::{self, Config, Credentials};
 use crate::damap::{Damap, InstanceConfig};
 
-const DEFAULT_URL: &str = "http://localhost:8080";
+const DEFAULT_URL: &str = "http://localhost:8085";
 
 /// Asks for the DAMAP URL and logs in, making the current directory a
 /// project folder. Replaces any session saved here before.
@@ -36,8 +36,8 @@ pub fn resume() -> Result<Damap> {
     let http = http_client()?;
     let (damap, instance) = reach(&http, &config.url)?;
     let oidc = discover(http, &damap, &instance)?;
-    let tokens = match Credentials::load()? {
-        Some(credentials) => match oidc.refresh(&credentials.refresh_token) {
+    let tokens = match Credentials::load()?.refresh_token {
+        Some(refresh_token) => match oidc.refresh(&refresh_token) {
             Ok(tokens) => tokens,
             Err(e) => {
                 println!("{e}. Please log in again.");
@@ -74,7 +74,11 @@ fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
     .save()?;
     // Keycloak rotates refresh tokens, so store the newest one every time.
     match tokens.refresh_token {
-        Some(refresh_token) => Credentials { refresh_token }.save()?,
+        Some(refresh_token) => {
+            let mut credentials = Credentials::load()?;
+            credentials.refresh_token = Some(refresh_token);
+            credentials.save()?
+        }
         None => println!(
             "The login server issued no refresh token; you will have to log in again next time."
         ),

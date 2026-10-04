@@ -2,8 +2,9 @@
 //!
 //! Both live in a `.damap-helper` folder inside the research folder. Like git with
 //! `.git`, we look for it in the current directory and its parents, and
-//! create it in the current directory on first login. The refresh token is
-//! kept in its own file, readable only by the user and ignored by git.
+//! create it in the current directory on first login. Secrets (the refresh
+//! token and the AI API key) are kept in their own file, readable only by the
+//! user and ignored by git.
 
 use std::env;
 use std::fs;
@@ -16,11 +17,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 const DIR_NAME: &str = ".damap-helper";
 const CONFIG_FILE: &str = "config.toml";
 const CREDENTIALS_FILE: &str = "credentials.toml";
-const AI_KEY_FILE: &str = "ai-key.toml";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    /// Base URL of the DAMAP backend, e.g. `http://localhost:8080`.
+    /// Base URL of the DAMAP backend, e.g. `http://localhost:8085`.
     pub url: String,
     /// The language model that reviews changes; none means no reviews.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -35,16 +35,14 @@ pub struct AiConfig {
     pub model: String,
 }
 
-/// The key for the API in [`AiConfig`], kept apart from the config (and from
-/// the DAMAP login, so logging out leaves it) and private like it.
-#[derive(Serialize, Deserialize)]
-pub struct AiKey {
-    pub api_key: String,
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Credentials {
-    pub refresh_token: String,
+    /// The DAMAP login session; logging out removes only this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    /// The key for the API in [`AiConfig`], if it needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 impl Config {
@@ -61,52 +59,17 @@ impl Config {
 }
 
 impl Credentials {
-    pub fn load() -> Result<Option<Self>> {
-        match find_dir()? {
-            Some(dir) => read_toml(&dir.join(CREDENTIALS_FILE)),
-            None => Ok(None),
-        }
+    /// The saved secrets; none if nothing is saved yet.
+    pub fn load() -> Result<Self> {
+        let saved = match find_dir()? {
+            Some(dir) => read_toml(&dir.join(CREDENTIALS_FILE))?,
+            None => None,
+        };
+        Ok(saved.unwrap_or_default())
     }
 
     pub fn save(&self) -> Result<()> {
         write_toml(&ensure_dir()?.join(CREDENTIALS_FILE), self, true)
-    }
-
-    /// Returns whether there was a session to remove.
-    pub fn delete() -> Result<bool> {
-        let Some(dir) = find_dir()? else {
-            return Ok(false);
-        };
-        match fs::remove_file(dir.join(CREDENTIALS_FILE)) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(e).context("could not remove saved credentials"),
-        }
-    }
-}
-
-impl AiKey {
-    pub fn load() -> Result<Option<Self>> {
-        match find_dir()? {
-            Some(dir) => read_toml(&dir.join(AI_KEY_FILE)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn save(&self) -> Result<()> {
-        write_toml(&ensure_dir()?.join(AI_KEY_FILE), self, true)
-    }
-
-    pub fn delete() -> Result<()> {
-        let Some(dir) = find_dir()? else {
-            return Ok(());
-        };
-        match fs::remove_file(dir.join(AI_KEY_FILE)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                Err(e).context("could not remove the saved API key")
-            }
-            _ => Ok(()),
-        }
     }
 }
 
@@ -129,11 +92,8 @@ pub fn create_here() -> Result<PathBuf> {
     let dir = env::current_dir()?.join(DIR_NAME);
     fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
     // Keep secrets out of git, should the research folder be a repo.
-    fs::write(
-        dir.join(".gitignore"),
-        format!("{CREDENTIALS_FILE}\n{AI_KEY_FILE}\n"),
-    )
-    .with_context(|| format!("could not write {}", dir.join(".gitignore").display()))?;
+    fs::write(dir.join(".gitignore"), format!("{CREDENTIALS_FILE}\n"))
+        .with_context(|| format!("could not write {}", dir.join(".gitignore").display()))?;
     Ok(dir)
 }
 

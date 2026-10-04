@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 
 use super::connect::http_client;
 use crate::agent;
-use crate::config::{AiConfig, AiKey, Config};
+use crate::config::{AiConfig, Config, Credentials};
 
 /// Ollama's OpenAI-compatible API, the obvious choice for a local model.
 const DEFAULT_URL: &str = "http://localhost:11434/v1";
@@ -54,13 +54,9 @@ pub fn setup(args: ModelArgs) -> Result<()> {
     };
     let model = choose_model(&url, models, args.model, previous.map(|ai| ai.model))?;
 
-    match &api_key {
-        Some(key) => AiKey {
-            api_key: key.clone(),
-        }
-        .save()?,
-        None => AiKey::delete()?,
-    }
+    let mut credentials = Credentials::load()?;
+    credentials.api_key = api_key;
+    credentials.save()?;
     println!("Changes will be checked with {model}.");
     config.ai = Some(AiConfig { url, model });
     config.save()?;
