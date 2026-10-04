@@ -11,6 +11,7 @@ genai = "0.6.5"
 jiff = "0.2.37"
 notify = "8.2.0"
 notify-debouncer-full = "0.7.0"
+notify-rust = "4.18.1"
 open = "5.4.4"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "form", "rustls"] }

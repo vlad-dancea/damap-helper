@@ -22,6 +22,7 @@ pub enum Update {
     Reviewing,
     Verdict(Result<Verdict>),
     WatchErrors(Vec<String>),
+    NotifyFailed(String),
 }
 
 pub struct Screen {
@@ -168,6 +169,9 @@ impl Screen {
                     self.log.push(Line::from(format!("watch error: {e}").red()));
                 }
             }
+            Update::NotifyFailed(e) => self.log.push(Line::from(
+                format!("  could not show a notification: {e}").yellow(),
+            )),
         }
     }
 
