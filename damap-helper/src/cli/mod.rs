@@ -22,7 +22,7 @@ struct Cli {
 enum Command {
     /// Set up this folder: connect to DAMAP, log in, and choose an AI model.
     Init {
-        /// DAMAP backend URL; asked for if not given.
+        /// DAMAP's URL, as opened in the browser; asked for if not given.
         #[arg(long)]
         url: Option<String>,
         #[command(flatten)]
@@ -30,8 +30,8 @@ enum Command {
     },
     /// Watch this folder for changes.
     Run {
-        /// Have the model from `[ai]` in `.damap-helper/config.toml` check each
-        /// change against the DMP with this id.
+        /// Check changes against the DMP with this id instead of the one
+        /// chosen in `init`.
         #[arg(long)]
         dmp: Option<i64>,
     },

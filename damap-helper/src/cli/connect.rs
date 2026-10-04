@@ -7,7 +7,7 @@ use dialoguer::Input;
 use reqwest::blocking::Client;
 
 use crate::auth::{Oidc, Tokens};
-use crate::config::{self, Config, Credentials};
+use crate::config::{self, Config, Credentials, DamapConfig};
 use crate::damap::{Damap, InstanceConfig};
 
 const DEFAULT_URL: &str = "http://localhost:8085";
@@ -18,7 +18,7 @@ pub fn init(url: Option<String>) -> Result<Damap> {
     let http = http_client()?;
     let (damap, instance) = match url {
         Some(url) => reach(&http, &url)?,
-        None => ask_for_damap(&http, Config::load()?.map(|c| c.url))?,
+        None => ask_for_damap(&http, Config::load()?.map(|c| c.damap.frontend_url))?,
     };
     let oidc = discover(http, &damap, &instance)?;
     let tokens = oidc.login()?;
@@ -34,7 +34,7 @@ pub fn resume() -> Result<Damap> {
         bail!("this folder is not set up yet; run `damap-helper init` first");
     };
     let http = http_client()?;
-    let (damap, instance) = reach(&http, &config.url)?;
+    let (damap, instance) = reach(&http, &config.damap.frontend_url)?;
     let oidc = discover(http, &damap, &instance)?;
     let tokens = match Credentials::load()?.refresh_token {
         Some(refresh_token) => match oidc.refresh(&refresh_token) {
@@ -66,10 +66,14 @@ fn discover(http: Client, damap: &Damap, instance: &InstanceConfig) -> Result<Oi
 }
 
 fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
+    // Settings chosen before, or written by hand, stay as they were.
+    let previous = Config::load()?;
     Config {
-        url: damap.url().to_string(),
-        // Settings the user wrote by hand stay as they were.
-        ai: Config::load()?.and_then(|config| config.ai),
+        damap: DamapConfig {
+            frontend_url: damap.url().to_string(),
+            dmp_id: previous.as_ref().and_then(|config| config.damap.dmp_id),
+        },
+        ai: previous.and_then(|config| config.ai),
     }
     .save()?;
     // Keycloak rotates refresh tokens, so store the newest one every time.
@@ -95,12 +99,12 @@ fn reach(http: &Client, url: &str) -> Result<(Damap, InstanceConfig)> {
     Ok((damap, instance))
 }
 
-/// Asks for a DAMAP URL until one answers like a DAMAP backend.
+/// Asks for DAMAP's URL until one answers like DAMAP.
 fn ask_for_damap(http: &Client, previous: Option<String>) -> Result<(Damap, InstanceConfig)> {
     let mut default = previous.unwrap_or_else(|| DEFAULT_URL.to_string());
     loop {
         let url: String = Input::new()
-            .with_prompt("DAMAP backend URL")
+            .with_prompt("DAMAP URL (as opened in the browser)")
             .default(default)
             .interact_text()?;
         let damap = Damap::new(http.clone(), &url);

@@ -20,11 +20,9 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
     let damap = connect::resume()?;
     let root = config::project_root()?.context("this folder is not set up yet")?;
 
-    let review = match dmp {
-        Some(id) => {
-            let Some(ai) = Config::load()?.and_then(|config| config.ai) else {
-                bail!("no AI model to check with; choose one with `damap-helper init`");
-            };
+    let config = Config::load()?.context("this folder is not set up yet")?;
+    let review = match (dmp.or(config.damap.dmp_id), config.ai) {
+        (Some(id), Some(ai)) => {
             let reviewer = Reviewer::new(&ai, Credentials::load()?.api_key)?;
             let dmp = serde_json::to_string_pretty(&damap.madmp(id)?)?;
             println!(
@@ -33,7 +31,16 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
             );
             Some(Review { reviewer, dmp })
         }
-        None => None,
+        (Some(_), None) if dmp.is_some() => {
+            bail!("no AI model to check with; choose one with `damap-helper init`")
+        }
+        (None, Some(_)) => {
+            println!(
+                "No DMP chosen, so changes are not checked; choose one with `damap-helper init`."
+            );
+            None
+        }
+        _ => None,
     };
 
     let watcher = FolderWatcher::new(&root)?;
