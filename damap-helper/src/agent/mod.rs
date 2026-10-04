@@ -1,10 +1,13 @@
 mod tools;
 
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 
 use anyhow::{Context, Result, bail};
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, Tool, ToolChoice, ToolResponse};
+use genai::chat::{
+    ChatMessage, ChatOptions, ChatRequest, ReasoningEffort, Tool, ToolChoice, ToolResponse,
+};
 use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ModelIden, ServiceTarget};
 use reqwest::blocking::Client as HttpClient;
@@ -12,7 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-use crate::config::AiConfig;
+use crate::config::{AiConfig, Effort};
 use crate::watcher::Change;
 use tools::Tools;
 
@@ -41,7 +44,13 @@ pub struct Verdict {
 pub struct Reviewer {
     runtime: Runtime,
     client: Client,
-    model: String,
+    choice: Mutex<ModelChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub model: String,
+    pub effort: Option<Effort>,
 }
 
 impl Reviewer {
@@ -52,12 +61,22 @@ impl Reviewer {
         Ok(Self {
             runtime,
             client: openai_compatible(&config.url, api_key),
-            model: config.model.clone(),
+            choice: Mutex::new(ModelChoice {
+                model: config.model.clone(),
+                effort: config.effort,
+            }),
         })
     }
 
-    pub fn model(&self) -> &str {
-        &self.model
+    pub fn choice(&self) -> ModelChoice {
+        self.choice
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set_choice(&self, choice: ModelChoice) {
+        *self.choice.lock().unwrap_or_else(PoisonError::into_inner) = choice;
     }
 
     pub fn review(&self, root: &Path, dmp: &str, changes: &[Change]) -> Result<Verdict> {
@@ -83,23 +102,29 @@ impl Reviewer {
             "The DMP:\n```json\n{dmp}\n```\n\nWhat changed in the project folder:\n{}",
             changes.join("\n")
         );
-        self.runtime.block_on(self.run(&tools, prompt))
+        self.runtime
+            .block_on(self.run(&self.choice(), &tools, prompt))
     }
 
-    async fn run(&self, tools: &Tools, prompt: String) -> Result<Verdict> {
+    async fn run(&self, choice: &ModelChoice, tools: &Tools, prompt: String) -> Result<Verdict> {
         let mut definitions = Tools::definitions();
         definitions.push(verdict_tool());
         let mut request = ChatRequest::new(vec![ChatMessage::user(prompt)])
             .with_system(SYSTEM_PROMPT)
             .with_tools(definitions);
-        let options = ChatOptions::default().with_tool_choice(ToolChoice::Required);
+        let mut options = ChatOptions::default().with_tool_choice(ToolChoice::Auto);
+        if let Some(effort) = choice.effort {
+            options = options
+                .with_reasoning_effort(reasoning_effort(effort))
+                .with_extra_body(json!({ "allowed_openai_params": ["reasoning_effort"] }));
+        }
 
         for _ in 0..MAX_TURNS {
             let response = self
                 .client
-                .exec_chat(&self.model, request.clone(), Some(&options))
+                .exec_chat(&choice.model, request.clone(), Some(&options))
                 .await
-                .with_context(|| format!("the model {} failed", self.model))?;
+                .with_context(|| format!("the model {} failed", choice.model))?;
             let calls: Vec<_> = response.tool_calls().into_iter().cloned().collect();
             request = request.append_message(ChatMessage::assistant(response.content));
             if calls.is_empty() {
@@ -123,6 +148,15 @@ impl Reviewer {
             }
         }
         bail!("the model gave no verdict after {MAX_TURNS} replies")
+    }
+}
+
+fn reasoning_effort(effort: Effort) -> ReasoningEffort {
+    match effort {
+        Effort::None => ReasoningEffort::None,
+        Effort::Low => ReasoningEffort::Low,
+        Effort::Medium => ReasoningEffort::Medium,
+        Effort::High => ReasoningEffort::High,
     }
 }
 
@@ -298,6 +332,7 @@ mod tests {
             &AiConfig {
                 url: endpoint,
                 model: "test".to_string(),
+                effort: Some(Effort::Low),
             },
             Some("sk-test".to_string()),
         )
@@ -320,6 +355,8 @@ mod tests {
         let (head, body) = &requests[0];
         assert!(head.starts_with("POST /v1/chat/completions "), "{head}");
         assert!(head.contains("authorization: Bearer sk-test"), "{head}");
+        assert_eq!(body["reasoning_effort"], "low");
+        assert_eq!(body["allowed_openai_params"], json!(["reasoning_effort"]));
         let first = body.to_string();
         assert!(first.contains("created: data/patients.csv"), "{first}");
         let messages = requests[1].1["messages"].as_array().unwrap();

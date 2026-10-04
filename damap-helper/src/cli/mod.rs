@@ -1,5 +1,6 @@
 mod connect;
 mod model;
+mod model_panel;
 mod run;
 mod screen;
 mod setup;
