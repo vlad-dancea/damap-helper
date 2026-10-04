@@ -1,12 +1,3 @@
-//! File watcher: observes the project folder and reports what changed in it.
-//!
-//! The OS events alone miss things: when a folder appears (say a dataset is
-//! copied in), the OS only starts watching it a moment later, and files
-//! written into it before then produce no events. So the watcher keeps a list
-//! of every path it has seen, scans each new folder itself, and reports
-//! whatever it had not seen yet. The same list drops duplicates when a file
-//! is found by the scan and then also reported by the OS.
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::ops::Bound;
@@ -41,11 +32,8 @@ impl Change {
 }
 
 pub struct FolderWatcher {
-    // Kept alive for as long as the watcher should run; dropping it stops watching.
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
     events: Receiver<DebounceEventResult>,
-    /// Every file and folder under the root we have seen. Ordered, so that a
-    /// folder's contents sit right after the folder itself.
     known: BTreeSet<PathBuf>,
 }
 
@@ -54,7 +42,6 @@ impl FolderWatcher {
         let (tx, events) = mpsc::channel();
         let mut debouncer = new_debouncer(DEBOUNCE_TIMEOUT, None, tx)?;
         debouncer.watch(root, RecursiveMode::Recursive)?;
-        // Scan only once watching, so nothing created in between is lost.
         let mut known = BTreeSet::new();
         walk(root, &mut |path| {
             known.insert(path);
@@ -74,8 +61,6 @@ impl FolderWatcher {
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if paths.len() == 2 => {
                 self.rename(&paths[0], &paths[1], changes)
             }
-            // A move into or out of the folder: only one side is in here,
-            // so whatever is on disk now tells which.
             EventKind::Modify(ModifyKind::Name(_)) => {
                 for path in paths {
                     if fs::symlink_metadata(path).is_ok() {
@@ -85,7 +70,6 @@ impl FolderWatcher {
                     }
                 }
             }
-            // Permission and timestamp changes are noise for now.
             EventKind::Modify(ModifyKind::Metadata(_)) => {}
             EventKind::Modify(_) => {
                 for path in paths {
@@ -100,8 +84,6 @@ impl FolderWatcher {
         }
     }
 
-    /// Records `path` and, for a folder, everything in it, reporting each
-    /// path not seen before as created.
     fn discover(&mut self, path: &Path, changes: &mut Vec<Change>) {
         walk(path, &mut |found| {
             if self.known.insert(found.clone()) {
@@ -110,7 +92,6 @@ impl FolderWatcher {
         });
     }
 
-    /// Forgets `path` and everything in it, reporting it as deleted if known.
     fn forget(&mut self, path: &Path, changes: &mut Vec<Change>) {
         if !self.take_subtree(path).is_empty() {
             changes.push(Change::Deleted(path.to_path_buf()));
@@ -120,7 +101,6 @@ impl FolderWatcher {
     fn rename(&mut self, from: &Path, to: &Path, changes: &mut Vec<Change>) {
         let moved = self.take_subtree(from);
         if moved.is_empty() {
-            // We never saw the original, so to us it is new.
             self.discover(to, changes);
             return;
         }
@@ -138,7 +118,6 @@ impl FolderWatcher {
             from: from.to_path_buf(),
             to: to.to_path_buf(),
         });
-        // Pick up anything written into a renamed folder that we missed.
         self.discover(to, changes);
     }
 
@@ -150,7 +129,6 @@ impl FolderWatcher {
         Ok(changes)
     }
 
-    /// Removes `path` and everything below it from the known paths.
     fn take_subtree(&mut self, path: &Path) -> Vec<PathBuf> {
         let subtree: Vec<PathBuf> = self
             .known
@@ -166,18 +144,14 @@ impl FolderWatcher {
 }
 
 impl Iterator for FolderWatcher {
-    /// One debounced batch: what changed, or what went wrong while watching.
     type Item = Result<Vec<Change>, Vec<notify::Error>>;
 
-    /// Blocks until the next batch; ends when the watcher stops.
     fn next(&mut self) -> Option<Self::Item> {
         let result = self.events.recv().ok()?;
         Some(self.handle(result))
     }
 }
 
-/// Calls `visit` for `path` and, if it is a folder, everything below it.
-/// Symlinks are not followed; paths that vanish mid-scan are skipped.
 fn walk(path: &Path, visit: &mut impl FnMut(PathBuf)) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
@@ -196,10 +170,8 @@ fn walk(path: &Path, visit: &mut impl FnMut(PathBuf)) {
 mod tests {
     use super::*;
 
-    /// How long the watcher must stay silent before a test stops listening.
     const QUIET: Duration = Duration::from_secs(4);
 
-    /// Every change reported until the watcher stays quiet.
     fn drain(watcher: &mut FolderWatcher) -> Vec<Change> {
         let mut changes = Vec::new();
         while let Ok(result) = watcher.events.recv_timeout(QUIET) {

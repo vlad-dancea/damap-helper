@@ -1,18 +1,19 @@
-//! Command-line interface: argument parsing and one module per command.
-
 mod connect;
-mod init;
 mod model;
 mod run;
+mod setup;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::config::Credentials;
 
-/// Keeps a research folder in line with its DAMAP data management plan.
 #[derive(Parser)]
-#[command(version, arg_required_else_help = true)]
+#[command(
+    version,
+    about = "Keeps a research folder in line with its DAMAP data management plan",
+    arg_required_else_help = true
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -20,28 +21,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Set up this folder: connect to DAMAP, log in, and choose an AI model.
-    Init {
-        /// DAMAP's URL, as opened in the browser; asked for if not given.
-        #[arg(long)]
+    #[command(about = "Set up this folder, or change its settings: DAMAP login, DMP and AI model")]
+    Setup {
+        #[arg(
+            long,
+            help = "DAMAP's URL, as opened in the browser; asked for if not given"
+        )]
         url: Option<String>,
         #[command(flatten)]
         model: model::ModelArgs,
     },
-    /// Watch this folder for changes.
+    #[command(about = "Watch this folder for changes")]
     Run {
-        /// Check changes against the DMP with this id instead of the one
-        /// chosen in `init`.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Check changes against the DMP with this id instead of the one chosen in `setup`"
+        )]
         dmp: Option<i64>,
     },
-    /// Forget the saved login for this folder.
+    #[command(about = "Forget the saved login for this folder")]
     Logout,
 }
 
 pub fn run() -> Result<()> {
     match Cli::parse().command {
-        Command::Init { url, model } => init::run(url, model),
+        Command::Setup { url, model } => setup::run(url, model),
         Command::Run { dmp } => run::run(dmp),
         Command::Logout => {
             let mut credentials = Credentials::load()?;

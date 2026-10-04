@@ -7,16 +7,12 @@ use crate::agent::Reviewer;
 use crate::config::{self, Config, Credentials};
 use crate::watcher::{Change, FolderWatcher};
 
-/// Checks changes against one DMP.
 struct Review {
     reviewer: Reviewer,
-    /// The DMP as pretty-printed maDMP JSON, fetched once at start.
     dmp: String,
 }
 
 pub fn run(dmp: Option<i64>) -> Result<()> {
-    // Connect before watching, so an unreachable DAMAP or an expired login
-    // shows up now rather than at the first change.
     let damap = connect::resume()?;
     let root = config::project_root()?.context("this folder is not set up yet")?;
 
@@ -32,11 +28,11 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
             Some(Review { reviewer, dmp })
         }
         (Some(_), None) if dmp.is_some() => {
-            bail!("no AI model to check with; choose one with `damap-helper init`")
+            bail!("no AI model to check with; choose one with `damap-helper setup`")
         }
         (None, Some(_)) => {
             println!(
-                "No DMP chosen, so changes are not checked; choose one with `damap-helper init`."
+                "No DMP chosen, so changes are not checked; choose one with `damap-helper setup`."
             );
             None
         }
@@ -51,7 +47,6 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
     for batch in watcher {
         match batch {
             Ok(changes) => {
-                // Our own state is not part of the research data.
                 let changes: Vec<Change> = changes
                     .into_iter()
                     .filter(|change| !change.paths().into_iter().all(|p| in_damap_dir(&root, p)))

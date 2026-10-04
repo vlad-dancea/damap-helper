@@ -1,15 +1,3 @@
-//! The AI reviewer: asks a language model whether a batch of changes to the
-//! project folder contradicts the data management plan.
-//!
-//! This is a deliberately small agent loop. The model gets the DMP and the
-//! list of changes, may look around the folder with read-only tools, and must
-//! finish by calling `report_verdict`. Acting on the verdict (undo, or change
-//! the DMP) is left to the caller, so the model itself can never alter anything.
-//!
-//! The model is reached through an OpenAI-compatible API, which Ollama, LM
-//! Studio, vLLM, OpenRouter, OpenAI and most university LLM gateways offer.
-//! The `genai` crate speaks the protocol, tool calls included.
-
 mod tools;
 
 use std::path::Path;
@@ -28,7 +16,6 @@ use crate::config::AiConfig;
 use crate::watcher::Change;
 use tools::Tools;
 
-/// Model replies per review before we give up on getting a verdict.
 const MAX_TURNS: usize = 12;
 
 const SYSTEM_PROMPT: &str = "\
@@ -47,21 +34,17 @@ exactly once. Only report a contradiction you can point to in the DMP.";
 #[derive(Debug, Deserialize)]
 pub struct Verdict {
     pub contradicts: bool,
-    /// Where in the DMP the contradiction is, e.g. `dataset[0].personal_data`.
     pub dmp_field: Option<String>,
     pub explanation: String,
 }
 
 pub struct Reviewer {
-    // genai is async; the rest of damap-helper is not, so it gets a runtime
-    // of its own and nothing else has to change.
     runtime: Runtime,
     client: Client,
     model: String,
 }
 
 impl Reviewer {
-    /// `api_key` may be `None`: local servers usually need none.
     pub fn new(config: &AiConfig, api_key: Option<String>) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -77,7 +60,6 @@ impl Reviewer {
         &self.model
     }
 
-    /// Asks the model about `changes` under `root`, given the DMP as maDMP JSON.
     pub fn review(&self, root: &Path, dmp: &str, changes: &[Change]) -> Result<Verdict> {
         let tools = Tools::new(root)?;
         let relative = |path: &Path| {
@@ -110,9 +92,6 @@ impl Reviewer {
         let mut request = ChatRequest::new(vec![ChatMessage::user(prompt)])
             .with_system(SYSTEM_PROMPT)
             .with_tools(definitions);
-        // Every reply must be a tool call, so the model cannot end the review
-        // with prose instead of a verdict. Not every provider honours this,
-        // hence the reminder below.
         let options = ChatOptions::default().with_tool_choice(ToolChoice::Required);
 
         for _ in 0..MAX_TURNS {
@@ -122,8 +101,6 @@ impl Reviewer {
                 .await
                 .with_context(|| format!("the model {} failed", self.model))?;
             let calls: Vec<_> = response.tool_calls().into_iter().cloned().collect();
-            // Send the reply back as it came, so provider-specific parts
-            // (such as Gemini's thought signatures) survive the round trip.
             request = request.append_message(ChatMessage::assistant(response.content));
             if calls.is_empty() {
                 request = request.append_message(ChatMessage::user(
@@ -172,7 +149,6 @@ fn verdict_tool() -> Tool {
         }))
 }
 
-/// The models the server at `url` offers, by id.
 pub fn list_models(http: &HttpClient, url: &str, api_key: Option<&str>) -> Result<Vec<String>> {
     #[derive(Deserialize)]
     struct Models {
@@ -203,16 +179,12 @@ pub fn list_models(http: &HttpClient, url: &str, api_key: Option<&str>) -> Resul
     Ok(ids)
 }
 
-/// `url` with a trailing slash: joining `models` or `chat/completions` onto
-/// a URL drops its last path segment otherwise.
 fn base_url(url: &str) -> String {
     format!("{}/", url.trim_end_matches('/'))
 }
 
-/// A genai client that sends every request to the OpenAI-compatible server at `url`.
 fn openai_compatible(url: &str, api_key: Option<String>) -> Client {
     let endpoint = Endpoint::from_owned(base_url(url));
-    // genai's OpenAI adapter insists on a key; an empty one does no harm.
     let auth = AuthData::from_single(api_key.unwrap_or_default());
     Client::builder()
         .with_service_target_resolver_fn(move |target: ServiceTarget| {
@@ -236,12 +208,8 @@ mod tests {
 
     use super::*;
 
-    /// A request the fake server received: its head (request line and
-    /// headers) and its JSON body, `Null` if it had none.
     type Request = (String, Value);
 
-    /// A fake OpenAI-compatible server that answers each request with the
-    /// next of `replies` and returns the requests it received.
     fn fake_model(replies: Vec<Value>) -> (String, thread::JoinHandle<Vec<Request>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -354,7 +322,6 @@ mod tests {
         assert!(head.contains("authorization: Bearer sk-test"), "{head}");
         let first = body.to_string();
         assert!(first.contains("created: data/patients.csv"), "{first}");
-        // The second request carries what read_file found.
         let messages = requests[1].1["messages"].as_array().unwrap();
         let tool_message = messages.iter().find(|m| m["role"] == "tool").unwrap();
         assert_eq!(tool_message["content"], "name,diagnosis\n");

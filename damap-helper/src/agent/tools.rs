@@ -1,9 +1,3 @@
-//! What the model may do in the project folder: list folders and read files.
-//!
-//! Nothing here writes, and every path is resolved against the project root
-//! and refused if it ends up outside it (through `..`, an absolute path or a
-//! symlink) or inside our own `.damap-helper` folder.
-
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Read;
@@ -14,13 +8,10 @@ use genai::chat::Tool;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-/// Most entries `list_dir` returns, so a huge folder cannot flood the context.
 const MAX_ENTRIES: usize = 200;
-/// Most bytes `read_file` returns from one file.
 const MAX_READ: u64 = 16 * 1024;
 
 pub struct Tools {
-    /// Canonical, so resolved paths can be checked with `starts_with`.
     root: PathBuf,
 }
 
@@ -64,8 +55,6 @@ impl Tools {
         ]
     }
 
-    /// Runs the tool `name`. An `Err` is meant for the model, not the user:
-    /// it says what was wrong so the model can try again.
     pub fn call(&self, name: &str, args: &Value) -> Result<String, String> {
         let PathArgs { path } =
             serde_json::from_value(args.clone()).map_err(|e| format!("invalid arguments: {e}"))?;
@@ -126,7 +115,6 @@ fn read_file(path: &Path) -> Result<String, String> {
     file.take(MAX_READ)
         .read_to_end(&mut head)
         .map_err(|e| e.to_string())?;
-    // Text files practically never contain NUL bytes; binary formats do.
     if head.contains(&0) {
         let mut magic = String::new();
         for byte in head.iter().take(16) {

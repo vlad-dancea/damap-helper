@@ -1,9 +1,7 @@
-//! Connecting to DAMAP: setting up a folder, and resuming its saved session.
-
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
-use dialoguer::Input;
+use dialoguer::{Confirm, Input};
 use reqwest::blocking::Client;
 
 use crate::auth::{Oidc, Tokens};
@@ -12,26 +10,36 @@ use crate::damap::{Damap, InstanceConfig};
 
 const DEFAULT_URL: &str = "http://localhost:8085";
 
-/// Asks for the DAMAP URL and logs in, making the current directory a
-/// project folder. Replaces any session saved here before.
-pub fn init(url: Option<String>) -> Result<Damap> {
+pub fn setup(url: Option<String>) -> Result<Damap> {
     let http = http_client()?;
+    let previous_url = Config::load()?.map(|c| c.damap.frontend_url);
     let (damap, instance) = match url {
         Some(url) => reach(&http, &url)?,
-        None => ask_for_damap(&http, Config::load()?.map(|c| c.damap.frontend_url))?,
+        None => ask_for_damap(&http, previous_url.clone())?,
     };
     let oidc = discover(http, &damap, &instance)?;
-    let tokens = oidc.login()?;
-    // Only now, so a failed init leaves no `.damap-helper` behind.
+    let session = match Credentials::load()?.refresh_token {
+        Some(token) if previous_url.as_deref() == Some(damap.url()) => oidc.refresh(&token).ok(),
+        _ => None,
+    };
+    let tokens = match session {
+        Some(tokens)
+            if Confirm::new()
+                .with_prompt("Stay logged in?")
+                .default(true)
+                .interact()? =>
+        {
+            tokens
+        }
+        _ => oidc.login()?,
+    };
     config::create_here()?;
     save_session(damap, tokens)
 }
 
-/// Reuses the project folder's saved DAMAP URL and session, logging in
-/// again if the session has expired.
 pub fn resume() -> Result<Damap> {
     let Some(config) = Config::load()? else {
-        bail!("this folder is not set up yet; run `damap-helper init` first");
+        bail!("this folder is not set up yet; run `damap-helper setup` first");
     };
     let http = http_client()?;
     let (damap, instance) = reach(&http, &config.damap.frontend_url)?;
@@ -66,7 +74,6 @@ fn discover(http: Client, damap: &Damap, instance: &InstanceConfig) -> Result<Oi
 }
 
 fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
-    // Settings chosen before, or written by hand, stay as they were.
     let previous = Config::load()?;
     Config {
         damap: DamapConfig {
@@ -76,7 +83,6 @@ fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
         ai: previous.and_then(|config| config.ai),
     }
     .save()?;
-    // Keycloak rotates refresh tokens, so store the newest one every time.
     match tokens.refresh_token {
         Some(refresh_token) => {
             let mut credentials = Credentials::load()?;
@@ -94,12 +100,11 @@ fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
 fn reach(http: &Client, url: &str) -> Result<(Damap, InstanceConfig)> {
     let damap = Damap::new(http.clone(), url);
     let instance = damap.instance_config().map_err(|e| {
-        anyhow!("{e:#}\nIs DAMAP running? To use a different URL, run `damap-helper init`.")
+        anyhow!("{e:#}\nIs DAMAP running? To use a different URL, run `damap-helper setup`.")
     })?;
     Ok((damap, instance))
 }
 
-/// Asks for DAMAP's URL until one answers like DAMAP.
 fn ask_for_damap(http: &Client, previous: Option<String>) -> Result<(Damap, InstanceConfig)> {
     let mut default = previous.unwrap_or_else(|| DEFAULT_URL.to_string());
     loop {

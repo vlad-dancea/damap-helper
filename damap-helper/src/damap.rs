@@ -1,13 +1,9 @@
-//! Thin client for the DAMAP REST API.
-
 use anyhow::{Context, Result, bail};
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, RequestBuilder};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-/// The public part of `GET /api/config`. DAMAP serves it without login, and
-/// it tells us which Keycloak realm and client to log in with.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceConfig {
@@ -18,13 +14,11 @@ pub struct InstanceConfig {
     pub app_title: Option<String>,
 }
 
-/// One entry of `GET /api/dmps/list`.
 #[derive(Debug, Deserialize)]
 pub struct DmpListItem {
     pub id: i64,
     pub title: Option<String>,
     pub project: Option<Project>,
-    /// When it was last changed, e.g. `2026-10-04T16:20:00.000+02:00`.
     pub modified: Option<String>,
 }
 
@@ -34,7 +28,6 @@ pub struct Project {
 }
 
 impl DmpListItem {
-    /// What DAMAP's own DMP list calls it: its project's title, if any.
     pub fn name(&self) -> Option<&str> {
         let project = self.project.as_ref().and_then(|p| p.title.as_deref());
         [project, self.title.as_deref()]
@@ -85,12 +78,10 @@ impl Damap {
             .with_context(|| format!("{} does not look like DAMAP", self.url))
     }
 
-    /// DMPs the logged-in user owns or is a contributor on.
     pub fn list_dmps(&self) -> Result<Vec<DmpListItem>> {
         self.get_json("/api/dmps/list")
     }
 
-    /// The DMP `id` in the RDA DMP Common Standard (maDMP) JSON format.
     pub fn madmp(&self, id: i64) -> Result<serde_json::Value> {
         self.get_json(&format!("/api/madmp/{id}"))
     }
