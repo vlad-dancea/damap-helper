@@ -12,7 +12,7 @@ use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ModelIden, ServiceTarget};
 use reqwest::blocking::Client as HttpClient;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 
 use crate::config::{AiConfig, Effort};
@@ -39,6 +39,36 @@ pub struct Verdict {
     pub contradicts: bool,
     pub dmp_field: Option<String>,
     pub explanation: String,
+}
+
+/// One step of a review, for the debug pane.
+#[derive(Debug, Clone)]
+pub enum Trace {
+    /// A message added to the conversation by us.
+    Sent {
+        role: &'static str,
+        text: String,
+    },
+    /// The conversation so far goes to the model.
+    Request {
+        turn: usize,
+        choice: ModelChoice,
+        tools: Vec<String>,
+    },
+    Reply {
+        turn: usize,
+        reasoning: Option<String>,
+        texts: Vec<String>,
+        calls: Vec<(String, Value)>,
+        stop_reason: Option<String>,
+        tokens_in: Option<i32>,
+        tokens_out: Option<i32>,
+    },
+    ToolResult {
+        name: String,
+        output: String,
+    },
+    Failed(String),
 }
 
 pub struct Reviewer {
@@ -79,7 +109,13 @@ impl Reviewer {
         *self.choice.lock().unwrap_or_else(PoisonError::into_inner) = choice;
     }
 
-    pub fn review(&self, root: &Path, dmp: &str, changes: &[Change]) -> Result<Verdict> {
+    pub fn review(
+        &self,
+        root: &Path,
+        dmp: &str,
+        changes: &[Change],
+        trace: &mut dyn FnMut(Trace),
+    ) -> Result<Verdict> {
         let tools = Tools::new(root)?;
         let relative = |path: &Path| {
             path.strip_prefix(root)
@@ -103,12 +139,30 @@ impl Reviewer {
             changes.join("\n")
         );
         self.runtime
-            .block_on(self.run(&self.choice(), &tools, prompt))
+            .block_on(self.run(&self.choice(), &tools, prompt, trace))
     }
 
-    async fn run(&self, choice: &ModelChoice, tools: &Tools, prompt: String) -> Result<Verdict> {
+    async fn run(
+        &self,
+        choice: &ModelChoice,
+        tools: &Tools,
+        prompt: String,
+        trace: &mut dyn FnMut(Trace),
+    ) -> Result<Verdict> {
         let mut definitions = Tools::definitions();
         definitions.push(verdict_tool());
+        let tool_names: Vec<String> = definitions
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        trace(Trace::Sent {
+            role: "system",
+            text: SYSTEM_PROMPT.to_string(),
+        });
+        trace(Trace::Sent {
+            role: "user",
+            text: prompt.clone(),
+        });
         let mut request = ChatRequest::new(vec![ChatMessage::user(prompt)])
             .with_system(SYSTEM_PROMPT)
             .with_tools(definitions);
@@ -119,18 +173,44 @@ impl Reviewer {
                 .with_extra_body(json!({ "allowed_openai_params": ["reasoning_effort"] }));
         }
 
-        for _ in 0..MAX_TURNS {
-            let response = self
+        for turn in 1..=MAX_TURNS {
+            trace(Trace::Request {
+                turn,
+                choice: choice.clone(),
+                tools: tool_names.clone(),
+            });
+            let response = match self
                 .client
                 .exec_chat(&choice.model, request.clone(), Some(&options))
                 .await
-                .with_context(|| format!("the model {} failed", choice.model))?;
+            {
+                Ok(response) => response,
+                Err(e) => {
+                    trace(Trace::Failed(format!("{e:#}")));
+                    return Err(e).with_context(|| format!("the model {} failed", choice.model));
+                }
+            };
             let calls: Vec<_> = response.tool_calls().into_iter().cloned().collect();
+            trace(Trace::Reply {
+                turn,
+                reasoning: response.reasoning_content.clone(),
+                texts: response.texts().into_iter().map(str::to_string).collect(),
+                calls: calls
+                    .iter()
+                    .map(|call| (call.fn_name.clone(), call.fn_arguments.clone()))
+                    .collect(),
+                stop_reason: response.stop_reason.as_ref().map(|r| r.raw().to_string()),
+                tokens_in: response.usage.prompt_tokens,
+                tokens_out: response.usage.completion_tokens,
+            });
             request = request.append_message(ChatMessage::assistant(response.content));
             if calls.is_empty() {
-                request = request.append_message(ChatMessage::user(
-                    "Please finish by calling report_verdict.",
-                ));
+                let nudge = "Please finish by calling report_verdict.";
+                trace(Trace::Sent {
+                    role: "user",
+                    text: nudge.to_string(),
+                });
+                request = request.append_message(ChatMessage::user(nudge));
                 continue;
             }
             for call in calls {
@@ -144,6 +224,10 @@ impl Reviewer {
                         .call(&call.fn_name, &call.fn_arguments)
                         .unwrap_or_else(|e| format!("error: {e}"))
                 };
+                trace(Trace::ToolResult {
+                    name: call.fn_name.clone(),
+                    output: output.clone(),
+                });
                 request = request.append_message(ToolResponse::new(call.call_id, output));
             }
         }
@@ -338,11 +422,13 @@ mod tests {
         )
         .unwrap();
 
+        let mut traces = Vec::new();
         let verdict = reviewer
             .review(
                 root.path(),
                 r#"{"dmp": {"dataset": [{"personal_data": "no"}]}}"#,
                 &[Change::Created(root.path().join("data/patients.csv"))],
+                &mut |trace| traces.push(trace),
             )
             .unwrap();
 
@@ -362,6 +448,29 @@ mod tests {
         let messages = requests[1].1["messages"].as_array().unwrap();
         let tool_message = messages.iter().find(|m| m["role"] == "tool").unwrap();
         assert_eq!(tool_message["content"], "name,diagnosis\n");
+
+        let kinds: Vec<String> = traces
+            .iter()
+            .map(|trace| match trace {
+                Trace::Sent { role, .. } => format!("sent {role}"),
+                Trace::Request { turn, .. } => format!("request {turn}"),
+                Trace::Reply { turn, calls, .. } => format!("reply {turn}: {}", calls[0].0),
+                Trace::ToolResult { name, output } => format!("{name}: {output}"),
+                Trace::Failed(e) => format!("failed: {e}"),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "sent system",
+                "sent user",
+                "request 1",
+                "reply 1: read_file",
+                "read_file: name,diagnosis\n",
+                "request 2",
+                "reply 2: report_verdict",
+            ]
+        );
     }
 
     #[test]

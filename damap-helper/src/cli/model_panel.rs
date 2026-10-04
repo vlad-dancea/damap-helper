@@ -5,10 +5,12 @@ use std::thread;
 use anyhow::{Context, Result};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::layout::{Constraint, Flex, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph,
+};
 
 use super::connect::http_client;
 use crate::agent::{self, ModelChoice, Reviewer};
@@ -182,10 +184,11 @@ impl ModelPanel {
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         self.poll();
+        let rows = self.visible().len().max(EFFORTS.len()) as u16;
         let [area] = Layout::horizontal([Constraint::Max(72)])
             .flex(Flex::Center)
             .areas(area);
-        let [area] = Layout::vertical([Constraint::Percentage(70)])
+        let [area] = Layout::vertical([Constraint::Max(rows + 5)])
             .flex(Flex::Center)
             .areas(area);
         frame.render_widget(Clear, area);
@@ -195,8 +198,6 @@ impl ModelPanel {
             " choose  ".into(),
             "Tab".bold(),
             " model/effort  ".into(),
-            "type".bold(),
-            " filter  ".into(),
             "Enter".bold(),
             " use  ".into(),
             "Esc".bold(),
@@ -206,30 +207,48 @@ impl ModelPanel {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(" Change model ".bold())
-            .title_bottom(keys);
+            .title_bottom(keys)
+            .padding(Padding::horizontal(1));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let [models, efforts] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Length(16)]).areas(inner);
+        let [filter, _, columns] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .areas(inner);
+        self.draw_filter(frame, filter);
+        let [models, divider, efforts] = Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Length(3),
+            Constraint::Length(10),
+        ])
+        .areas(columns);
         self.draw_models(frame, models);
+        frame.render_widget(
+            Block::new()
+                .borders(Borders::LEFT)
+                .border_style(Style::new().fg(Color::DarkGray)),
+            divider.inner(Margin::new(1, 0)),
+        );
         self.draw_efforts(frame, efforts);
     }
 
-    fn draw_models(&mut self, frame: &mut Frame, area: Rect) {
-        let block = section(" Model ", self.focus == Focus::Model);
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let [filter, list] =
-            Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
-
-        frame.render_widget(
+    fn draw_filter(&self, frame: &mut Frame, area: Rect) {
+        let line = if self.filter.is_empty() {
             Line::from(vec![
-                "filter: ".add_modifier(Modifier::DIM),
-                Span::raw(self.filter.clone()),
-            ]),
-            filter,
-        );
+                "/ ".fg(Color::DarkGray),
+                "type to filter".add_modifier(Modifier::DIM),
+            ])
+        } else {
+            Line::from(vec!["/ ".fg(Color::Cyan), Span::raw(self.filter.clone())])
+        };
+        frame.render_widget(line, area);
+    }
+
+    fn draw_models(&mut self, frame: &mut Frame, area: Rect) {
+        let list = header(frame, area, "Model", self.focus == Focus::Model);
         let message = match &self.models {
             Models::Loading(_) => Some("Loading models…".add_modifier(Modifier::DIM)),
             Models::Failed(e) => Some(e.clone().red()),
@@ -255,7 +274,7 @@ impl ModelPanel {
     }
 
     fn draw_efforts(&mut self, frame: &mut Frame, area: Rect) {
-        let block = section(" Effort ", self.focus == Focus::Effort);
+        let list = header(frame, area, "Effort", self.focus == Focus::Effort);
         let items: Vec<ListItem> = EFFORTS
             .iter()
             .map(|effort| {
@@ -264,20 +283,24 @@ impl ModelPanel {
             })
             .collect();
         frame.render_stateful_widget(
-            highlighted(List::new(items), self.focus == Focus::Effort).block(block),
-            area,
+            highlighted(List::new(items), self.focus == Focus::Effort),
+            list,
             &mut self.effort,
         );
     }
 }
 
-fn section(title: &str, focused: bool) -> Block<'_> {
-    let block = Block::bordered().title(title);
-    if focused {
-        block.border_style(Style::new().fg(Color::Cyan))
+/// Draws a column title and returns the area below it.
+fn header(frame: &mut Frame, area: Rect, title: &str, focused: bool) -> Rect {
+    let [title_area, rest] =
+        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
+    let style = if focused {
+        Style::new().fg(Color::Cyan).bold()
     } else {
-        block.border_style(Style::new().fg(Color::DarkGray))
-    }
+        Style::new().fg(Color::DarkGray)
+    };
+    frame.render_widget(Line::styled(title.to_uppercase(), style), title_area);
+    rest
 }
 
 fn item(name: &str, current: bool) -> ListItem<'static> {
@@ -292,7 +315,7 @@ fn highlighted(list: List<'_>, focused: bool) -> List<'_> {
     let style = if focused {
         Style::new().fg(Color::Black).bg(Color::Cyan)
     } else {
-        Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
+        Style::new().fg(Color::Cyan)
     };
     list.highlight_style(style)
 }
