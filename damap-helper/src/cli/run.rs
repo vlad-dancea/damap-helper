@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use super::connect;
 use crate::agent::Reviewer;
-use crate::config::{self, AiKey, Config};
+use crate::config::{self, Config, Credentials};
 use crate::watcher::{Change, FolderWatcher};
 
 /// Checks changes against one DMP.
@@ -25,7 +25,7 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
             let Some(ai) = Config::load()?.and_then(|config| config.ai) else {
                 bail!("no AI model to check with; choose one with `damap-helper init`");
             };
-            let reviewer = Reviewer::new(&ai, AiKey::load()?.map(|key| key.api_key))?;
+            let reviewer = Reviewer::new(&ai, Credentials::load()?.api_key)?;
             let dmp = serde_json::to_string_pretty(&damap.madmp(id)?)?;
             println!(
                 "Checking changes against DMP #{id} with {}.",

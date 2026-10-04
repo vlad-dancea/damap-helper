@@ -199,7 +199,14 @@ mod tests {
     fn refuses_our_own_state() {
         let (_dir, tools) = project();
         assert!(call(&tools, "read_file", ".damap-helper/credentials.toml").is_err());
-        assert!(call(&tools, "read_file", "data/../.damap-helper/credentials.toml").is_err());
+        assert!(
+            call(
+                &tools,
+                "read_file",
+                "data/../.damap-helper/credentials.toml"
+            )
+            .is_err()
+        );
     }
 
     #[test]
