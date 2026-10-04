@@ -1,8 +1,9 @@
 use anyhow::Result;
 
 use super::connect;
+use super::model::{self, ModelArgs};
 
-pub fn run(url: Option<String>) -> Result<()> {
+pub fn run(url: Option<String>, model: ModelArgs) -> Result<()> {
     let damap = connect::init(url)?;
     let dmps = damap.list_dmps()?;
     match dmps.len() {
@@ -14,6 +15,7 @@ pub fn run(url: Option<String>) -> Result<()> {
         let title = dmp.title.as_deref().unwrap_or("(untitled)");
         println!("  #{:<5} {title}", dmp.id);
     }
+    model::setup(model)?;
     println!("Run `damap-helper run` to start watching this folder.");
     Ok(())
 }

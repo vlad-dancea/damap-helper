@@ -22,7 +22,7 @@ pub fn init(url: Option<String>) -> Result<Damap> {
     };
     let oidc = discover(http, &damap, &instance)?;
     let tokens = oidc.login()?;
-    // Only now, so a failed init leaves no `.damap` behind.
+    // Only now, so a failed init leaves no `.damap-helper` behind.
     config::create_here()?;
     save_session(damap, tokens)
 }
@@ -52,7 +52,7 @@ pub fn resume() -> Result<Damap> {
     save_session(damap, tokens)
 }
 
-fn http_client() -> Result<Client> {
+pub(super) fn http_client() -> Result<Client> {
     Ok(Client::builder()
         .user_agent(concat!("damap-helper/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(15))
@@ -68,6 +68,8 @@ fn discover(http: Client, damap: &Damap, instance: &InstanceConfig) -> Result<Oi
 fn save_session(mut damap: Damap, tokens: Tokens) -> Result<Damap> {
     Config {
         url: damap.url().to_string(),
+        // Settings the user wrote by hand stay as they were.
+        ai: Config::load()?.and_then(|config| config.ai),
     }
     .save()?;
     // Keycloak rotates refresh tokens, so store the newest one every time.

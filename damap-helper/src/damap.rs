@@ -71,6 +71,11 @@ impl Damap {
         self.get_json("/api/dmps/list")
     }
 
+    /// The DMP `id` in the RDA DMP Common Standard (maDMP) JSON format.
+    pub fn madmp(&self, id: i64) -> Result<serde_json::Value> {
+        self.get_json(&format!("/api/madmp/{id}"))
+    }
+
     fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let request = self.http.get(format!("{}{path}", self.url));
         send_json(self.authorize(request), path)

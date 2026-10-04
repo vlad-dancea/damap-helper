@@ -1,6 +1,6 @@
 //! Local state: which DAMAP instance to talk to, and the login session.
 //!
-//! Both live in a `.damap` folder inside the research folder. Like git with
+//! Both live in a `.damap-helper` folder inside the research folder. Like git with
 //! `.git`, we look for it in the current directory and its parents, and
 //! create it in the current directory on first login. The refresh token is
 //! kept in its own file, readable only by the user and ignored by git.
@@ -13,14 +13,33 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-const DIR_NAME: &str = ".damap";
+const DIR_NAME: &str = ".damap-helper";
 const CONFIG_FILE: &str = "config.toml";
 const CREDENTIALS_FILE: &str = "credentials.toml";
+const AI_KEY_FILE: &str = "ai-key.toml";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     /// Base URL of the DAMAP backend, e.g. `http://localhost:8080`.
     pub url: String,
+    /// The language model that reviews changes; none means no reviews.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    /// Base URL of an OpenAI-compatible API, e.g. `http://localhost:11434/v1`.
+    pub url: String,
+    /// One of the models it offers, e.g. `qwen3:8b`.
+    pub model: String,
+}
+
+/// The key for the API in [`AiConfig`], kept apart from the config (and from
+/// the DAMAP login, so logging out leaves it) and private like it.
+#[derive(Serialize, Deserialize)]
+pub struct AiKey {
+    pub api_key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -66,7 +85,32 @@ impl Credentials {
     }
 }
 
-/// The nearest `.damap` folder in the current directory or its parents.
+impl AiKey {
+    pub fn load() -> Result<Option<Self>> {
+        match find_dir()? {
+            Some(dir) => read_toml(&dir.join(AI_KEY_FILE)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn save(&self) -> Result<()> {
+        write_toml(&ensure_dir()?.join(AI_KEY_FILE), self, true)
+    }
+
+    pub fn delete() -> Result<()> {
+        let Some(dir) = find_dir()? else {
+            return Ok(());
+        };
+        match fs::remove_file(dir.join(AI_KEY_FILE)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                Err(e).context("could not remove the saved API key")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The nearest `.damap-helper` folder in the current directory or its parents.
 fn find_dir() -> Result<Option<PathBuf>> {
     let cwd = env::current_dir().context("could not determine the current directory")?;
     Ok(cwd
@@ -75,22 +119,25 @@ fn find_dir() -> Result<Option<PathBuf>> {
         .find(|candidate| candidate.is_dir()))
 }
 
-/// The research folder: the one holding the nearest `.damap`.
+/// The research folder: the one holding the nearest `.damap-helper`.
 pub fn project_root() -> Result<Option<PathBuf>> {
     Ok(find_dir()?.and_then(|dir| dir.parent().map(Path::to_path_buf)))
 }
 
-/// Makes the current directory a project folder by creating `.damap` in it.
+/// Makes the current directory a project folder by creating `.damap-helper` in it.
 pub fn create_here() -> Result<PathBuf> {
     let dir = env::current_dir()?.join(DIR_NAME);
     fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-    // Keep the login token out of git, should the research folder be a repo.
-    fs::write(dir.join(".gitignore"), format!("{CREDENTIALS_FILE}\n"))
-        .with_context(|| format!("could not write {}", dir.join(".gitignore").display()))?;
+    // Keep secrets out of git, should the research folder be a repo.
+    fs::write(
+        dir.join(".gitignore"),
+        format!("{CREDENTIALS_FILE}\n{AI_KEY_FILE}\n"),
+    )
+    .with_context(|| format!("could not write {}", dir.join(".gitignore").display()))?;
     Ok(dir)
 }
 
-/// The nearest `.damap` folder, created in the current directory if there is none.
+/// The nearest `.damap-helper` folder, created in the current directory if there is none.
 fn ensure_dir() -> Result<PathBuf> {
     match find_dir()? {
         Some(dir) => Ok(dir),
