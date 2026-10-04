@@ -1,8 +1,11 @@
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 
 use super::connect;
+use super::screen::{Screen, Update};
 use crate::agent::Reviewer;
 use crate::config::{self, Config, Credentials};
 use crate::watcher::{Change, FolderWatcher};
@@ -17,85 +20,78 @@ pub fn run(dmp: Option<i64>) -> Result<()> {
     let root = config::project_root()?.context("this folder is not set up yet")?;
 
     let config = Config::load()?.context("this folder is not set up yet")?;
-    let review = match (dmp.or(config.damap.dmp_id), config.ai) {
+    let (review, status) = match (dmp.or(config.damap.dmp_id), config.ai) {
         (Some(id), Some(ai)) => {
             let reviewer = Reviewer::new(&ai, Credentials::load()?.api_key)?;
+            let name = damap
+                .list_dmps()?
+                .into_iter()
+                .find(|listed| listed.id == id)
+                .and_then(|listed| listed.name().map(str::to_string))
+                .unwrap_or_else(|| "(untitled)".to_string());
             let dmp = serde_json::to_string_pretty(&damap.madmp(id)?)?;
-            println!(
-                "Checking changes against DMP #{id} with {}.",
-                reviewer.model()
-            );
-            Some(Review { reviewer, dmp })
+            let status = vec![
+                format!("Comparing changes with project #{id} - {name}."),
+                format!("Using {} from {}.", reviewer.model(), ai.url),
+            ];
+            (Some(Review { reviewer, dmp }), status)
         }
         (Some(_), None) if dmp.is_some() => {
             bail!("no AI model to check with; choose one with `damap-helper setup`")
         }
-        (None, Some(_)) => {
-            println!(
+        (None, Some(_)) => (
+            None,
+            vec![
                 "No DMP chosen, so changes are not checked; choose one with `damap-helper setup`."
-            );
-            None
-        }
-        _ => None,
+                    .to_string(),
+            ],
+        ),
+        _ => (None, vec!["Changes are not checked.".to_string()]),
     };
 
     let watcher = FolderWatcher::new(&root)?;
-    println!(
-        "Watching {} for changes. Press Ctrl+C to stop.",
-        root.display()
-    );
+    let (updates, received) = mpsc::channel();
+    let watched = root.clone();
+    thread::spawn(move || watch(&watched, watcher, review.as_ref(), &updates));
+    Screen::new(&root, status).run(received)
+}
+
+fn watch(
+    root: &Path,
+    watcher: FolderWatcher,
+    review: Option<&Review>,
+    updates: &mpsc::Sender<Update>,
+) {
     for batch in watcher {
-        match batch {
-            Ok(changes) => {
-                let changes: Vec<Change> = changes
-                    .into_iter()
-                    .filter(|change| !change.paths().into_iter().all(|p| in_damap_dir(&root, p)))
-                    .collect();
-                changes.iter().for_each(|change| report(&root, change));
-                if let Some(review) = &review
-                    && !changes.is_empty()
-                {
-                    check(&root, review, &changes);
+        let changes: Vec<Change> = match batch {
+            Ok(changes) => changes
+                .into_iter()
+                .filter(|change| !change.paths().into_iter().all(|p| in_damap_dir(root, p)))
+                .collect(),
+            Err(errors) => {
+                let errors = errors.iter().map(ToString::to_string).collect();
+                if updates.send(Update::WatchErrors(errors)).is_err() {
+                    return;
                 }
+                continue;
             }
-            Err(errors) => errors.iter().for_each(|e| eprintln!("watch error: {e}")),
+        };
+        if changes.is_empty() {
+            continue;
+        }
+        if updates.send(Update::Changes(changes.clone())).is_err() {
+            return;
+        }
+        if let Some(review) = review {
+            let verdict = review.reviewer.review(root, &review.dmp, &changes);
+            if updates.send(Update::Verdict(verdict)).is_err() {
+                return;
+            }
         }
     }
-    Ok(())
 }
 
 fn in_damap_dir(root: &Path, path: &Path) -> bool {
     path.strip_prefix(root)
         .is_ok_and(|p| p.starts_with(".damap-helper"))
-}
-
-fn report(root: &Path, change: &Change) {
-    let relative = |path: &Path| {
-        path.strip_prefix(root)
-            .unwrap_or(path)
-            .display()
-            .to_string()
-    };
-    match change {
-        Change::Created(path) => println!("created: {}", relative(path)),
-        Change::Changed(path) => println!("changed: {}", relative(path)),
-        Change::Renamed { from, to } => {
-            println!("renamed: {} -> {}", relative(from), relative(to))
-        }
-        Change::Deleted(path) => println!("deleted: {}", relative(path)),
-    }
-}
-
-fn check(root: &Path, review: &Review, changes: &[Change]) {
-    match review.reviewer.review(root, &review.dmp, changes) {
-        Ok(verdict) if verdict.contradicts => {
-            let field = verdict
-                .dmp_field
-                .map(|field| format!(" ({field})"))
-                .unwrap_or_default();
-            println!("  contradicts the DMP{field}: {}", verdict.explanation);
-        }
-        Ok(verdict) => println!("  in line with the DMP: {}", verdict.explanation),
-        Err(e) => eprintln!("  review failed: {e:#}"),
-    }
 }

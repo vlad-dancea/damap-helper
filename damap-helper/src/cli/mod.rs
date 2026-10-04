@@ -1,6 +1,7 @@
 mod connect;
 mod model;
 mod run;
+mod screen;
 mod setup;
 
 use anyhow::Result;
