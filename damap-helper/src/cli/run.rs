@@ -3,6 +3,7 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 
 use anyhow::{Context, Result, bail};
+use notify_rust::Notification;
 
 use super::connect;
 use super::model_panel::ModelSettings;
@@ -93,11 +94,47 @@ fn watch(
                 return;
             }
             let verdict = review.reviewer.review(root, &review.dmp, &changes);
+            match &verdict {
+                Ok(verdict) if verdict.contradicts => {
+                    let field = verdict
+                        .dmp_field
+                        .as_ref()
+                        .map(|field| format!(" ({field})"))
+                        .unwrap_or_default();
+                    notify(
+                        format!("Contradicts the DMP{field}"),
+                        verdict.explanation.clone(),
+                        updates,
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => notify(
+                    "Could not check the changes".to_string(),
+                    format!("{e:#}"),
+                    updates,
+                ),
+            }
             if updates.send(Update::Verdict(verdict)).is_err() {
                 return;
             }
         }
     }
+}
+
+// On its own thread: without a notification server, showing one can take
+// until a D-Bus timeout, and reviews should not wait for that.
+fn notify(summary: String, body: String, updates: &mpsc::Sender<Update>) {
+    let updates = updates.clone();
+    thread::spawn(move || {
+        let shown = Notification::new()
+            .appname("damap-helper")
+            .summary(&summary)
+            .body(&body)
+            .show();
+        if let Err(e) = shown {
+            let _ = updates.send(Update::NotifyFailed(e.to_string()));
+        }
+    });
 }
 
 fn in_damap_dir(root: &Path, path: &Path) -> bool {
