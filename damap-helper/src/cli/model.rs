@@ -50,13 +50,14 @@ pub fn setup(args: ModelArgs) -> Result<()> {
             saved_key,
         )?,
     };
+    let effort = previous.as_ref().and_then(|ai| ai.effort);
     let model = choose_model(&url, models, args.model, previous.map(|ai| ai.model))?;
 
     let mut credentials = Credentials::load()?;
     credentials.api_key = api_key;
     credentials.save()?;
     println!("Changes will be checked with {model}.");
-    config.ai = Some(AiConfig { url, model });
+    config.ai = Some(AiConfig { url, model, effort });
     config.save()?;
     Ok(())
 }

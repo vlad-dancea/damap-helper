@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 const DIR_NAME: &str = ".damap-helper";
 const CONFIG_FILE: &str = "config.toml";
 const CREDENTIALS_FILE: &str = "credentials.toml";
+const MADMP_FILE: &str = "madmp.json";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -28,6 +29,28 @@ pub struct DamapConfig {
 pub struct AiConfig {
     pub url: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    None,
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    pub fn name(self) -> &'static str {
+        match self {
+            Effort::None => "none",
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+        }
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -65,6 +88,13 @@ impl Credentials {
     }
 }
 
+pub fn save_madmp(json: &str) -> Result<()> {
+    let dir = ensure_dir()?;
+    write_gitignore(&dir)?;
+    let path = dir.join(MADMP_FILE);
+    fs::write(&path, json).with_context(|| format!("could not write {}", path.display()))
+}
+
 fn find_dir() -> Result<Option<PathBuf>> {
     let cwd = env::current_dir().context("could not determine the current directory")?;
     Ok(cwd
@@ -80,9 +110,14 @@ pub fn project_root() -> Result<Option<PathBuf>> {
 pub fn create_here() -> Result<PathBuf> {
     let dir = env::current_dir()?.join(DIR_NAME);
     fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-    fs::write(dir.join(".gitignore"), format!("{CREDENTIALS_FILE}\n"))
-        .with_context(|| format!("could not write {}", dir.join(".gitignore").display()))?;
+    write_gitignore(&dir)?;
     Ok(dir)
+}
+
+fn write_gitignore(dir: &Path) -> Result<()> {
+    let path = dir.join(".gitignore");
+    fs::write(&path, format!("{CREDENTIALS_FILE}\n{MADMP_FILE}\n"))
+        .with_context(|| format!("could not write {}", path.display()))
 }
 
 fn ensure_dir() -> Result<PathBuf> {
