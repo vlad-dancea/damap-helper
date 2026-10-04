@@ -2,6 +2,7 @@
 
 mod connect;
 mod init;
+mod model;
 mod run;
 
 use anyhow::Result;
@@ -19,22 +20,29 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Set up this folder: connect to DAMAP and log in.
+    /// Set up this folder: connect to DAMAP, log in, and choose an AI model.
     Init {
         /// DAMAP backend URL; asked for if not given.
         #[arg(long)]
         url: Option<String>,
+        #[command(flatten)]
+        model: model::ModelArgs,
     },
     /// Watch this folder for changes.
-    Run,
+    Run {
+        /// Have the model from `[ai]` in `.damap-helper/config.toml` check each
+        /// change against the DMP with this id.
+        #[arg(long)]
+        dmp: Option<i64>,
+    },
     /// Forget the saved login for this folder.
     Logout,
 }
 
 pub fn run() -> Result<()> {
     match Cli::parse().command {
-        Command::Init { url } => init::run(url),
-        Command::Run => run::run(),
+        Command::Init { url, model } => init::run(url, model),
+        Command::Run { dmp } => run::run(dmp),
         Command::Logout => {
             if Credentials::delete()? {
                 println!("Logged out.");
