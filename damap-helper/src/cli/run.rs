@@ -93,7 +93,11 @@ fn watch(
             if updates.send(Update::Reviewing).is_err() {
                 return;
             }
-            let verdict = review.reviewer.review(root, &review.dmp, &changes);
+            let verdict = review
+                .reviewer
+                .review(root, &review.dmp, &changes, &mut |trace| {
+                    let _ = updates.send(Update::Trace(trace));
+                });
             match &verdict {
                 Ok(verdict) if verdict.contradicts => {
                     let field = verdict

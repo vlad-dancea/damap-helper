@@ -1,4 +1,5 @@
 mod connect;
+mod debug_pane;
 mod model;
 mod model_panel;
 mod run;

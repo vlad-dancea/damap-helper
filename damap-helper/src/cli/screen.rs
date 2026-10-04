@@ -4,23 +4,27 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
+use super::debug_pane::DebugLog;
 use super::model_panel::{self, ModelPanel, ModelSettings, Outcome};
-use crate::agent::{ModelChoice, Verdict};
+use crate::agent::{ModelChoice, Trace, Verdict};
 use crate::watcher::Change;
 
 const TICK: Duration = Duration::from_millis(100);
+/// From this width on, the debug pane sits beside the changes, not below.
+const SIDE_BY_SIDE_WIDTH: u16 = 140;
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub enum Update {
     Changes(Vec<Change>),
     Reviewing,
     Verdict(Result<Verdict>),
+    Trace(Trace),
     WatchErrors(Vec<String>),
     NotifyFailed(String),
 }
@@ -30,6 +34,10 @@ pub struct Screen {
     status: Vec<String>,
     log: Vec<Line<'static>>,
     lines_from_bottom: usize,
+    debug: DebugLog,
+    debug_lines_from_bottom: usize,
+    debug_shown: bool,
+    debug_focused: bool,
     reviewing_since: Option<Instant>,
     settings: Option<ModelSettings>,
     panel: Option<ModelPanel>,
@@ -43,6 +51,10 @@ impl Screen {
             status,
             log: Vec::new(),
             lines_from_bottom: 0,
+            debug: DebugLog::default(),
+            debug_lines_from_bottom: 0,
+            debug_shown: false,
+            debug_focused: false,
             reviewing_since: None,
             settings,
             panel: None,
@@ -102,13 +114,20 @@ impl Screen {
             KeyCode::Char('m') => {
                 self.panel = self.settings.as_ref().map(ModelPanel::open);
             }
+            KeyCode::Char('d') => {
+                self.debug_shown = !self.debug_shown;
+                self.debug_focused = self.debug_shown;
+            }
+            KeyCode::Tab | KeyCode::BackTab if self.debug_shown => {
+                self.debug_focused = !self.debug_focused;
+            }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Up | KeyCode::Char('k') => self.scroll_up(1),
             KeyCode::Down | KeyCode::Char('j') => self.scroll_down(1),
             KeyCode::PageUp => self.scroll_up(10),
             KeyCode::PageDown => self.scroll_down(10),
-            KeyCode::End | KeyCode::Char('G') => self.lines_from_bottom = 0,
+            KeyCode::End | KeyCode::Char('G') => *self.focused_scroll() = 0,
             _ => {}
         }
     }
@@ -126,12 +145,22 @@ impl Screen {
         }
     }
 
+    fn focused_scroll(&mut self) -> &mut usize {
+        if self.debug_focused {
+            &mut self.debug_lines_from_bottom
+        } else {
+            &mut self.lines_from_bottom
+        }
+    }
+
     fn scroll_up(&mut self, lines: usize) {
-        self.lines_from_bottom = self.lines_from_bottom.saturating_add(lines);
+        let scroll = self.focused_scroll();
+        *scroll = scroll.saturating_add(lines);
     }
 
     fn scroll_down(&mut self, lines: usize) {
-        self.lines_from_bottom = self.lines_from_bottom.saturating_sub(lines);
+        let scroll = self.focused_scroll();
+        *scroll = scroll.saturating_sub(lines);
     }
 
     fn apply(&mut self, update: Update) {
@@ -144,7 +173,11 @@ impl Screen {
                     self.log.push(change_line(&self.root, change));
                 }
             }
-            Update::Reviewing => self.reviewing_since = Some(Instant::now()),
+            Update::Reviewing => {
+                self.reviewing_since = Some(Instant::now());
+                self.debug.review_started();
+            }
+            Update::Trace(trace) => self.debug.add(trace),
             Update::Verdict(Ok(verdict)) if verdict.contradicts => {
                 let field = verdict
                     .dmp_field
@@ -189,7 +222,7 @@ impl Screen {
                 format!(" from {}.", settings.url).into(),
             ]));
         }
-        let [header, log, footer] = Layout::vertical([
+        let [header, body, footer] = Layout::vertical([
             Constraint::Length(header_lines.len() as u16 + 2),
             Constraint::Fill(1),
             Constraint::Length(1),
@@ -207,7 +240,22 @@ impl Screen {
             header,
         );
 
-        self.draw_log(frame, log);
+        if self.debug_shown {
+            let direction = if body.width >= SIDE_BY_SIDE_WIDTH {
+                Direction::Horizontal
+            } else {
+                Direction::Vertical
+            };
+            let [log, debug] = Layout::new(
+                direction,
+                [Constraint::Percentage(40), Constraint::Percentage(60)],
+            )
+            .areas(body);
+            self.draw_log(frame, log);
+            self.draw_debug(frame, debug);
+        } else {
+            self.draw_log(frame, body);
+        }
 
         let mut keys = vec![
             " q".bold(),
@@ -215,8 +263,17 @@ impl Screen {
             "↑↓ PgUp PgDn".bold(),
             " scroll  ".into(),
             "End".bold(),
-            " latest".into(),
+            " latest  ".into(),
+            "d".bold(),
+            if self.debug_shown {
+                " hide debug".into()
+            } else {
+                " debug".into()
+            },
         ];
+        if self.debug_shown {
+            keys.extend(["  Tab".bold(), " switch pane".into()]);
+        }
         if self.settings.is_some() {
             keys.extend(["  m".bold(), " model".into()]);
         }
@@ -231,16 +288,13 @@ impl Screen {
     }
 
     fn draw_log(&mut self, frame: &mut Frame, area: Rect) {
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title(" Changes ");
+        let block = pane(" Changes ", self.debug_shown && !self.debug_focused);
         if self.log.is_empty() {
             let waiting =
                 Paragraph::new("No changes yet.".add_modifier(Modifier::DIM)).block(block);
             frame.render_widget(waiting, area);
             return;
         }
-        let inner = block.inner(area);
         let mut lines = self.log.clone();
         if let Some(since) = self.reviewing_since {
             let elapsed = since.elapsed();
@@ -251,13 +305,53 @@ impl Screen {
                     .add_modifier(Modifier::DIM),
             ]));
         }
-        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-        let total = paragraph.line_count(inner.width);
-        let max_scroll = total.saturating_sub(inner.height as usize);
-        self.lines_from_bottom = self.lines_from_bottom.min(max_scroll);
-        let top = (max_scroll - self.lines_from_bottom) as u16;
-        frame.render_widget(paragraph.scroll((top, 0)).block(block), area);
+        draw_scrolled(frame, area, block, lines, &mut self.lines_from_bottom);
     }
+
+    fn draw_debug(&mut self, frame: &mut Frame, area: Rect) {
+        let block = pane(" Debug: what the AI sees and does ", self.debug_focused);
+        if self.debug.is_empty() {
+            let waiting = Paragraph::new(
+                "Nothing sent to the AI yet; it starts with the next change."
+                    .add_modifier(Modifier::DIM),
+            )
+            .wrap(Wrap { trim: false })
+            .block(block);
+            frame.render_widget(waiting, area);
+            return;
+        }
+        let lines = self.debug.lines(block.inner(area).width).to_vec();
+        draw_scrolled(frame, area, block, lines, &mut self.debug_lines_from_bottom);
+    }
+}
+
+fn pane(title: &str, focused: bool) -> Block<'_> {
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(title);
+    if focused {
+        block.border_style(Style::new().fg(Color::Cyan))
+    } else {
+        block
+    }
+}
+
+/// Shows the end of `lines`, or further up by `lines_from_bottom`, which is
+/// clamped to what there is to scroll.
+fn draw_scrolled(
+    frame: &mut Frame,
+    area: Rect,
+    block: Block,
+    lines: Vec<Line<'static>>,
+    lines_from_bottom: &mut usize,
+) {
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total = paragraph.line_count(inner.width);
+    let max_scroll = total.saturating_sub(inner.height as usize);
+    *lines_from_bottom = (*lines_from_bottom).min(max_scroll);
+    let top = u16::try_from(max_scroll - *lines_from_bottom).unwrap_or(u16::MAX);
+    frame.render_widget(paragraph.scroll((top, 0)).block(block), area);
 }
 
 fn change_line(root: &Path, change: &Change) -> Line<'static> {
