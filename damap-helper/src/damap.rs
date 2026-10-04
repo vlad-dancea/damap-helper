@@ -23,6 +23,25 @@ pub struct InstanceConfig {
 pub struct DmpListItem {
     pub id: i64,
     pub title: Option<String>,
+    pub project: Option<Project>,
+    /// When it was last changed, e.g. `2026-10-04T16:20:00.000+02:00`.
+    pub modified: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Project {
+    pub title: Option<String>,
+}
+
+impl DmpListItem {
+    /// What DAMAP's own DMP list calls it: its project's title, if any.
+    pub fn name(&self) -> Option<&str> {
+        let project = self.project.as_ref().and_then(|p| p.title.as_deref());
+        [project, self.title.as_deref()]
+            .into_iter()
+            .flatten()
+            .find(|title| !title.trim().is_empty())
+    }
 }
 
 pub struct Damap {
@@ -56,14 +75,14 @@ impl Damap {
             .with_context(|| format!("could not reach {}", self.url))?;
         if !response.status().is_success() {
             bail!(
-                "{} answered {} on /api/config; is this a DAMAP backend?",
+                "{} answered {} on /api/config; is this DAMAP?",
                 self.url,
                 response.status()
             );
         }
         response
             .json()
-            .with_context(|| format!("{} does not look like a DAMAP backend", self.url))
+            .with_context(|| format!("{} does not look like DAMAP", self.url))
     }
 
     /// DMPs the logged-in user owns or is a contributor on.

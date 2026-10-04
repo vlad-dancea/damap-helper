@@ -20,11 +20,20 @@ const CREDENTIALS_FILE: &str = "credentials.toml";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    /// Base URL of the DAMAP backend, e.g. `http://localhost:8085`.
-    pub url: String,
+    pub damap: DamapConfig,
     /// The language model that reviews changes; none means no reviews.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<AiConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DamapConfig {
+    /// Where users open DAMAP in the browser, e.g. `http://localhost:8085`.
+    /// It also serves the backend's API under `/api`.
+    pub frontend_url: String,
+    /// The DMP that this folder's data belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dmp_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
