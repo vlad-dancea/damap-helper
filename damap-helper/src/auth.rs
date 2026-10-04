@@ -1,10 +1,3 @@
-//! Logging in to the Keycloak realm that protects DAMAP.
-//!
-//! The preferred flow is the OAuth device authorization grant: the CLI shows a
-//! code, the scientist confirms it in the browser, and no password ever
-//! touches the terminal. DAMAP's stock Keycloak client has that grant
-//! disabled, so we fall back to the password grant when Keycloak refuses.
-
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -90,7 +83,6 @@ impl Oidc {
         .map_err(|e| anyhow::anyhow!("session could not be refreshed: {e}"))
     }
 
-    /// Interactive login: device flow if the client allows it, else password.
     pub fn login(&self) -> Result<Tokens> {
         if let Some(endpoint) = &self.device_endpoint {
             match self.start_device_flow(endpoint)? {
@@ -132,7 +124,6 @@ impl Oidc {
             .unwrap_or(&authorization.verification_uri);
         println!("To log in, open {link}");
         println!("and confirm the code {}", authorization.user_code);
-        // Not being able to open a browser is fine; the link is printed above.
         let _ = open::that(link);
 
         let deadline = Instant::now() + Duration::from_secs(authorization.expires_in);
@@ -164,8 +155,6 @@ impl Oidc {
         .map_err(|e| anyhow::anyhow!("login failed: {e}"))
     }
 
-    /// Posts to the token endpoint. The outer error is a transport problem,
-    /// the inner one is an OAuth error the caller may want to react to.
     fn token_request(&self, params: &[(&str, &str)]) -> Result<Result<Tokens, OAuthError>> {
         let mut form = vec![
             ("client_id", self.client_id.as_str()),

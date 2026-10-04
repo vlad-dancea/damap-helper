@@ -1,55 +1,53 @@
-//! Choosing the language model that checks changes against the DMP.
-
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use dialoguer::{Confirm, FuzzySelect, Input, Password};
+use dialoguer::{FuzzySelect, Input, Password};
 use reqwest::blocking::Client;
 
 use super::connect::http_client;
 use crate::agent;
 use crate::config::{AiConfig, Config, Credentials};
 
-/// Ollama's OpenAI-compatible API, the obvious choice for a local model.
 const DEFAULT_URL: &str = "http://localhost:11434/v1";
 
 #[derive(Args)]
 pub struct ModelArgs {
-    /// Base URL of an OpenAI-compatible API for the model; asked for if not given.
-    #[arg(long, env = "DAMAP_HELPER_AI_URL")]
+    #[arg(
+        long,
+        env = "DAMAP_HELPER_AI_URL",
+        help = "Base URL of an OpenAI-compatible API for the model; asked for if not given"
+    )]
     pub ai_url: Option<String>,
-    /// API key for it, if it needs one; asked for along with the URL.
-    #[arg(long, env = "DAMAP_HELPER_API_KEY", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "DAMAP_HELPER_API_KEY",
+        hide_env_values = true,
+        help = "API key for it, if it needs one; asked for along with the URL"
+    )]
     pub api_key: Option<String>,
-    /// The model to use; chosen from the ones the API offers if not given.
-    #[arg(long, env = "DAMAP_HELPER_MODEL")]
+    #[arg(
+        long,
+        env = "DAMAP_HELPER_MODEL",
+        help = "The model to use; chosen from the ones the API offers if not given"
+    )]
     pub model: Option<String>,
 }
 
-/// Sets up the model for this project folder, or leaves it without one if
-/// the user declines.
 pub fn setup(args: ModelArgs) -> Result<()> {
     let mut config = Config::load()?.context("this folder is not set up yet")?;
-    let given = args.ai_url.is_some() || args.model.is_some();
-    if !given
-        && !Confirm::new()
-            .with_prompt("Use an AI model to check changes against the DMP?")
-            .default(true)
-            .interact()?
-    {
-        return Ok(());
-    }
-
     let http = http_client()?;
     let previous = config.ai.take();
+    let saved_key = Credentials::load()?.api_key;
     let (url, api_key, models) = match args.ai_url {
         Some(url) => {
-            let models = agent::list_models(&http, &url, args.api_key.as_deref())?;
-            (url, args.api_key, models)
+            let api_key = args.api_key.or(saved_key);
+            let models = agent::list_models(&http, &url, api_key.as_deref())?;
+            (url, api_key, models)
         }
         None => ask_for_api(
             &http,
             previous.as_ref().map(|ai| ai.url.clone()),
             args.api_key,
+            saved_key,
         )?,
     };
     let model = choose_model(&url, models, args.model, previous.map(|ai| ai.model))?;
@@ -63,11 +61,11 @@ pub fn setup(args: ModelArgs) -> Result<()> {
     Ok(())
 }
 
-/// Asks for the API's URL and key until it lists its models.
 fn ask_for_api(
     http: &Client,
     previous: Option<String>,
     given_key: Option<String>,
+    saved_key: Option<String>,
 ) -> Result<(String, Option<String>, Vec<String>)> {
     let mut default = previous.unwrap_or_else(|| DEFAULT_URL.to_string());
     loop {
@@ -78,11 +76,17 @@ fn ask_for_api(
         let api_key = match &given_key {
             Some(key) => Some(key.clone()),
             None => {
+                let prompt = match saved_key {
+                    Some(_) => "API key (empty keeps the saved one)",
+                    None => "API key (empty for none)",
+                };
                 let key = Password::new()
-                    .with_prompt("API key (empty for none)")
+                    .with_prompt(prompt)
                     .allow_empty_password(true)
                     .interact()?;
-                Some(key).filter(|key| !key.is_empty())
+                Some(key)
+                    .filter(|key| !key.is_empty())
+                    .or_else(|| saved_key.clone())
             }
         };
         match agent::list_models(http, &url, api_key.as_deref()) {
@@ -101,7 +105,6 @@ fn choose_model(
 ) -> Result<String> {
     if let Some(model) = given {
         if !models.contains(&model) {
-            // Some servers list only part of what they serve, so let it be.
             println!("Note: {url} does not list {model}; using it anyway.");
         }
         return Ok(model);

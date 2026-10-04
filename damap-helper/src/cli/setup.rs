@@ -7,20 +7,19 @@ use crate::config::Config;
 use crate::damap::{Damap, DmpListItem};
 
 pub fn run(url: Option<String>, model: ModelArgs) -> Result<()> {
-    let damap = connect::init(url)?;
+    let damap = connect::setup(url)?;
     choose_dmp(&damap)?;
     model::setup(model)?;
     println!("Run `damap-helper run` to start watching this folder.");
     Ok(())
 }
 
-/// Asks which DMP this folder's data belongs to, and saves the choice.
 fn choose_dmp(damap: &Damap) -> Result<()> {
     let mut config = Config::load()?.context("logging in did not save the config")?;
     let dmps = damap.list_dmps()?;
     if dmps.is_empty() {
         println!(
-            "Logged in. You have no DMPs yet; create one at {}, then run `damap-helper init` again.",
+            "Logged in. You have no DMPs yet; create one at {}, then run `damap-helper setup` again.",
             damap.url()
         );
         config.damap.dmp_id = None;
