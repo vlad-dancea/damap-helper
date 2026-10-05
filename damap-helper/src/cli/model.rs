@@ -3,11 +3,11 @@ use clap::Args;
 use dialoguer::{FuzzySelect, Input, Password};
 use reqwest::blocking::Client;
 
-use super::connect::http_client;
+use super::connect::{http_client, web_url};
 use crate::agent;
 use crate::config::{AiConfig, Config, Credentials};
 
-const DEFAULT_URL: &str = "http://localhost:11434/v1";
+const DEFAULT_URL: &str = "https://aqueduct.ai.datalab.tuwien.ac.at/v1";
 
 #[derive(Args)]
 pub struct ModelArgs {
@@ -39,6 +39,7 @@ pub fn setup(args: ModelArgs) -> Result<()> {
     let saved_key = Credentials::load()?.api_key;
     let (url, api_key, models) = match args.ai_url {
         Some(url) => {
+            let url = web_url(&url)?;
             let api_key = args.api_key.or(saved_key);
             let models = agent::list_models(&http, &url, api_key.as_deref())?;
             (url, api_key, models)
@@ -70,10 +71,17 @@ fn ask_for_api(
 ) -> Result<(String, Option<String>, Vec<String>)> {
     let mut default = previous.unwrap_or_else(|| DEFAULT_URL.to_string());
     loop {
-        let url: String = Input::new()
+        let input: String = Input::new()
             .with_prompt("AI API URL (OpenAI-compatible)")
-            .default(default)
+            .default(default.clone())
             .interact_text()?;
+        let url = match web_url(&input) {
+            Ok(url) => url,
+            Err(e) => {
+                println!("{e}. Try again, or press Ctrl+C to stop.");
+                continue;
+            }
+        };
         let api_key = match &given_key {
             Some(key) => Some(key.clone()),
             None => {

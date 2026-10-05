@@ -141,7 +141,7 @@ impl Oidc {
                 Err(e) => bail!("login failed: {e}"),
             }
         }
-        bail!("login timed out; run `damap-helper login` to try again")
+        bail!("login timed out; please try again")
     }
 
     fn password_login(&self) -> Result<Tokens> {
