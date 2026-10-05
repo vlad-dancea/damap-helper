@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::debug_pane::DebugLog;
 use super::model_panel::{self, ModelPanel, ModelSettings, Outcome};
@@ -19,20 +20,109 @@ const TICK: Duration = Duration::from_millis(100);
 /// From this width on, the debug pane sits beside the changes, not below.
 const SIDE_BY_SIDE_WIDTH: u16 = 140;
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/// Leads a verdict, pointing from the changes above it to the result.
+const RESULT_ARROW: &str = " ↳ ";
+/// An explicit green: terminal themes often remap the ANSI one.
+const IN_LINE_GREEN: Color = Color::Rgb(0x6c, 0xc6, 0x44);
 
 pub enum Update {
-    Changes(Vec<Change>),
-    Reviewing,
+    /// A change set, numbered from 1 in the order seen.
+    Changes(usize, Vec<Change>),
+    Reviewing(usize),
     Verdict(Result<Verdict>),
     Trace(Trace),
     WatchErrors(Vec<String>),
     NotifyFailed(String),
 }
 
+/// A line in the changes pane; a changed file carries the number of its
+/// change set, shown at the right edge, and a verdict wraps under the text
+/// after its arrow.
+struct LogLine {
+    line: Line<'static>,
+    set: Option<usize>,
+    verdict: bool,
+}
+
+impl From<Line<'static>> for LogLine {
+    fn from(line: Line<'static>) -> Self {
+        Self {
+            line,
+            set: None,
+            verdict: false,
+        }
+    }
+}
+
+impl LogLine {
+    fn verdict(spans: Vec<Span<'static>>) -> Self {
+        let mut line = vec![Span::raw(RESULT_ARROW)];
+        line.extend(spans);
+        Self {
+            line: Line::from(line),
+            set: None,
+            verdict: true,
+        }
+    }
+
+    fn render(&self, width: usize) -> Vec<Line<'static>> {
+        if self.verdict {
+            return wrap_hanging(&self.line, width, RESULT_ARROW.width());
+        }
+        let Some(set) = self.set else {
+            return vec![self.line.clone()];
+        };
+        let tag = format!("#{set}");
+        let used = self.line.width() + tag.len();
+        let gap = if used < width { width - used } else { 1 };
+        let mut line = self.line.clone();
+        line.push_span(Span::raw(" ".repeat(gap)));
+        line.push_span(tag.add_modifier(Modifier::DIM));
+        vec![line]
+    }
+}
+
+/// Wraps at spaces where it can, mid-word where it must, keeping each span's
+/// style; continuation rows start `indent` columns in.
+fn wrap_hanging(line: &Line<'static>, width: usize, indent: usize) -> Vec<Line<'static>> {
+    let indent = if indent < width / 2 { indent } else { 0 };
+    let mut rows = Vec::new();
+    let mut row: Vec<Span<'static>> = Vec::new();
+    let mut row_width = 0;
+    let mut break_row = |row: &mut Vec<Span<'static>>, row_width: &mut usize| {
+        if let Some(last) = row.last_mut() {
+            *last = Span::styled(last.content.trim_end().to_string(), last.style);
+        }
+        rows.push(Line::from(std::mem::replace(row, vec![Span::raw(" ".repeat(indent))])));
+        *row_width = indent;
+    };
+    for span in &line.spans {
+        for word in span.content.split_inclusive(' ') {
+            let visible = word.trim_end().width();
+            if row_width + visible > width && row_width > indent {
+                break_row(&mut row, &mut row_width);
+            }
+            for c in word.chars() {
+                let c_width = c.width().unwrap_or(0);
+                if c != ' ' && row_width + c_width > width && row_width > indent {
+                    break_row(&mut row, &mut row_width);
+                }
+                match row.last_mut() {
+                    Some(last) if last.style == span.style => last.content.to_mut().push(c),
+                    _ => row.push(Span::styled(c.to_string(), span.style)),
+                }
+                row_width += c_width;
+            }
+        }
+    }
+    break_row(&mut row, &mut row_width);
+    rows
+}
+
 pub struct Screen {
     root: PathBuf,
     status: Vec<String>,
-    log: Vec<Line<'static>>,
+    log: Vec<LogLine>,
     lines_from_bottom: usize,
     debug: DebugLog,
     debug_lines_from_bottom: usize,
@@ -85,7 +175,7 @@ impl Screen {
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         self.reviewing_since = None;
-                        self.log.push(Line::from("Stopped watching.".red()));
+                        self.log.push(Line::from("Stopped watching.".red()).into());
                         break;
                     }
                 }
@@ -123,6 +213,7 @@ impl Screen {
             }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
+            KeyCode::Char('c') if self.debug_shown => self.debug.toggle_collapsed(),
             KeyCode::Up | KeyCode::Char('k') => self.scroll_up(1),
             KeyCode::Down | KeyCode::Char('j') => self.scroll_down(1),
             KeyCode::PageUp => self.scroll_up(10),
@@ -138,10 +229,13 @@ impl Screen {
         };
         let described = model_panel::describe(&choice);
         if let Err(e) = settings.apply(choice) {
-            self.log.push(Line::from(
-                format!("Checking with {described} until you quit; could not save it: {e:#}")
-                    .yellow(),
-            ));
+            self.log.push(
+                Line::from(
+                    format!("Checking with {described} until you quit; could not save it: {e:#}")
+                        .yellow(),
+                )
+                .into(),
+            );
         }
     }
 
@@ -168,14 +262,18 @@ impl Screen {
             self.reviewing_since = None;
         }
         match update {
-            Update::Changes(changes) => {
+            Update::Changes(set, changes) => {
                 for change in &changes {
-                    self.log.push(change_line(&self.root, change));
+                    self.log.push(LogLine {
+                        line: change_line(&self.root, change),
+                        set: Some(set),
+                        verdict: false,
+                    });
                 }
             }
-            Update::Reviewing => {
+            Update::Reviewing(set) => {
                 self.reviewing_since = Some(Instant::now());
-                self.debug.review_started();
+                self.debug.review_started(set);
             }
             Update::Trace(trace) => self.debug.add(trace),
             Update::Verdict(Ok(verdict)) if verdict.contradicts => {
@@ -183,28 +281,27 @@ impl Screen {
                     .dmp_field
                     .map(|field| format!(" ({field})"))
                     .unwrap_or_default();
-                self.log.push(Line::from(vec![
-                    Span::raw("  "),
+                self.log.push(LogLine::verdict(vec![
                     format!("contradicts the DMP{field}:").red().bold(),
                     Span::raw(format!(" {}", verdict.explanation)),
                 ]));
             }
-            Update::Verdict(Ok(verdict)) => self.log.push(Line::from(vec![
-                Span::raw("  "),
-                "in line with the DMP:".green(),
+            Update::Verdict(Ok(verdict)) => self.log.push(LogLine::verdict(vec![
+                "in line with the DMP:".fg(IN_LINE_GREEN),
                 Span::raw(format!(" {}", verdict.explanation)),
             ])),
             Update::Verdict(Err(e)) => self
                 .log
-                .push(Line::from(format!("  review failed: {e:#}").red())),
+                .push(LogLine::verdict(vec![format!("review failed: {e:#}").red()])),
             Update::WatchErrors(errors) => {
                 for e in errors {
-                    self.log.push(Line::from(format!("watch error: {e}").red()));
+                    self.log
+                        .push(Line::from(format!("watch error: {e}").red()).into());
                 }
             }
-            Update::NotifyFailed(e) => self.log.push(Line::from(
-                format!("  could not show a notification: {e}").yellow(),
-            )),
+            Update::NotifyFailed(e) => self
+                .log
+                .push(Line::from(format!("  could not show a notification: {e}").yellow()).into()),
         }
     }
 
@@ -272,7 +369,12 @@ impl Screen {
             },
         ];
         if self.debug_shown {
-            keys.extend(["  Tab".bold(), " switch pane".into()]);
+            keys.extend(["  Tab".bold(), " switch pane".into(), "  c".bold()]);
+            keys.push(if self.debug.collapsed() {
+                " expand".into()
+            } else {
+                " collapse".into()
+            });
         }
         if self.settings.is_some() {
             keys.extend(["  m".bold(), " model".into()]);
@@ -295,7 +397,9 @@ impl Screen {
             frame.render_widget(waiting, area);
             return;
         }
-        let mut lines = self.log.clone();
+        let width = block.inner(area).width as usize;
+        let mut lines: Vec<Line<'static>> =
+            self.log.iter().flat_map(|line| line.render(width)).collect();
         if let Some(since) = self.reviewing_since {
             let elapsed = since.elapsed();
             let frame = SPINNER[(elapsed.as_millis() / TICK.as_millis()) as usize % SPINNER.len()];
@@ -372,4 +476,49 @@ fn change_line(root: &Path, change: &Change) -> Line<'static> {
         Change::Deleted(path) => ("deleted:", Color::Red, relative(path)),
     };
     Line::from(vec![label.fg(color), Span::raw(format!(" {text}"))])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(line: &Line) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn puts_the_change_set_at_the_right_edge() {
+        let line = LogLine {
+            line: Line::from("created: a.csv"),
+            set: Some(3),
+            verdict: false,
+        };
+        assert_eq!(text(&line.render(20)[0]), "created: a.csv    #3");
+    }
+
+    #[test]
+    fn puts_the_change_set_after_text_too_long_for_the_row() {
+        let line = LogLine {
+            line: Line::from("created: data/raw/a.csv"),
+            set: Some(12),
+            verdict: false,
+        };
+        assert_eq!(text(&line.render(20)[0]), "created: data/raw/a.csv #12");
+    }
+
+    #[test]
+    fn indents_the_rest_of_a_verdict_under_its_text() {
+        let line = LogLine::verdict(vec![
+            "in line:".green(),
+            Span::raw(" the file is fine and verylongwordhere"),
+        ]);
+        let rows: Vec<String> = line.render(16).iter().map(text).collect();
+        assert_eq!(
+            rows,
+            [" ↳ in line: the", "   file is fine", "   and", "   verylongwordh", "   ere"]
+        );
+    }
 }

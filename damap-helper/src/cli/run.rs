@@ -69,6 +69,7 @@ fn watch(
     review: Option<&Review>,
     updates: &mpsc::Sender<Update>,
 ) {
+    let mut set = 0;
     for batch in watcher {
         let changes: Vec<Change> = match batch {
             Ok(changes) => changes
@@ -86,11 +87,12 @@ fn watch(
         if changes.is_empty() {
             continue;
         }
-        if updates.send(Update::Changes(changes.clone())).is_err() {
+        set += 1;
+        if updates.send(Update::Changes(set, changes.clone())).is_err() {
             return;
         }
         if let Some(review) = review {
-            if updates.send(Update::Reviewing).is_err() {
+            if updates.send(Update::Reviewing(set)).is_err() {
                 return;
             }
             let verdict = review
@@ -106,14 +108,14 @@ fn watch(
                         .map(|field| format!(" ({field})"))
                         .unwrap_or_default();
                     notify(
-                        format!("Contradicts the DMP{field}"),
+                        format!("#{set} contradicts the DMP{field}"),
                         verdict.explanation.clone(),
                         updates,
                     );
                 }
                 Ok(_) => {}
                 Err(e) => notify(
-                    "Could not check the changes".to_string(),
+                    format!("Could not check change set #{set}"),
                     format!("{e:#}"),
                     updates,
                 ),
@@ -125,8 +127,6 @@ fn watch(
     }
 }
 
-// On its own thread: without a notification server, showing one can take
-// until a D-Bus timeout, and reviews should not wait for that.
 fn notify(summary: String, body: String, updates: &mpsc::Sender<Update>) {
     let updates = updates.clone();
     thread::spawn(move || {
